@@ -12,6 +12,6 @@
     "@capacitor/cli": "^5.0.0"
   },
   "scripts": {
-    "build": "echo 'No build step required'"
+    "build": "echo 'Skipping web build' && npx cap add android"
   }
 }
