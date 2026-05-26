@@ -1,0 +1,19 @@
+{
+  "appId": "dev.pages.bvdhytb_nhacthuoc.twa",
+  "appName": "BVĐHYTB",
+  "webDir": "app/src/main/assets/public",
+  "server": {
+    "url": "https://bvdhytb-nhacthuoc.pages.dev",
+    "cleartext": false
+  },
+  "android": {
+    "allowMixedContent": false
+  },
+  "plugins": {
+    "LocalNotifications": {
+      "smallIcon": "ic_notification",
+      "iconColor": "#0E2A56",
+      "sound": "alarm_med.wav"
+    }
+  }
+}
