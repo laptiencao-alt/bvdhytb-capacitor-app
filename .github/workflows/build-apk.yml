@@ -22,32 +22,28 @@ jobs:
     - name: Set up Android SDK
       uses: android-actions/setup-android@v3
 
+    - name: Fix icon filenames
+      run: |
+        # Đổi tên file icon về đúng ic_launcher.png
+        for density in mdpi hdpi xhdpi xxhdpi xxxhdpi; do
+          DIR="android/app/src/main/res/mipmap-${density}"
+          # Tìm file bất kỳ .png trong thư mục và đổi tên thành ic_launcher.png
+          for f in "$DIR"/*.png; do
+            base=$(basename "$f")
+            if [ "$base" != "ic_launcher.png" ] && [ "$base" != "ic_launcher_round.png" ]; then
+              cp "$f" "$DIR/ic_launcher.png"
+              cp "$f" "$DIR/ic_launcher_round.png"
+              echo "Fixed $density: $base → ic_launcher.png"
+            fi
+          done
+        done
+
     - name: Copy web assets to Android
       run: |
         mkdir -p android/app/src/main/assets/public
-        # Copy từ thư mục pw4 (web app nằm ở đây)
         if [ -d "pw4" ]; then
           cp -r pw4/. android/app/src/main/assets/public/
           echo "Copied from pw4 folder"
-          ls android/app/src/main/assets/public/
-        else
-          echo "ERROR: pw4 folder not found!"
-          ls -la
-        fi
-
-    - name: Download and resize app icon
-      run: |
-        curl -sL "https://bvdhytb-nhacthuoc.pages.dev/icon-512.png" -o /tmp/icon.png 2>/dev/null || true
-        if [ -f /tmp/icon.png ] && [ $(stat -c%s /tmp/icon.png) -gt 1000 ]; then
-          for density_size in "mdpi:48" "hdpi:72" "xhdpi:96" "xxhdpi:144" "xxxhdpi:192"; do
-            DENSITY=$(echo $density_size | cut -d: -f1)
-            SIZE=$(echo $density_size | cut -d: -f2)
-            DIR="android/app/src/main/res/mipmap-${DENSITY}"
-            mkdir -p "$DIR"
-            convert /tmp/icon.png -resize ${SIZE}x${SIZE} "$DIR/ic_launcher.png" 2>/dev/null || true
-            cp "$DIR/ic_launcher.png" "$DIR/ic_launcher_round.png" 2>/dev/null || true
-          done
-          echo "Icons resized"
         fi
 
     - name: Setup Gradle
