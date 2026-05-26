@@ -1,62 +1,64 @@
-<?xml version="1.0" encoding="utf-8"?>
-<manifest xmlns:android="http://schemas.android.com/apk/res/android">
+name: Build APK
 
-    <uses-permission android:name="android.permission.INTERNET" />
-    <uses-permission android:name="android.permission.ACCESS_NETWORK_STATE" />
-    <uses-permission android:name="android.permission.VIBRATE" />
-    <uses-permission android:name="android.permission.WAKE_LOCK" />
-    <uses-permission android:name="android.permission.RECEIVE_BOOT_COMPLETED" />
-    <uses-permission android:name="android.permission.FOREGROUND_SERVICE" />
-    <uses-permission android:name="android.permission.FOREGROUND_SERVICE_MEDIA_PLAYBACK" />
-    <uses-permission android:name="android.permission.SCHEDULE_EXACT_ALARM" />
-    <uses-permission android:name="android.permission.USE_EXACT_ALARM" />
-    <uses-permission android:name="android.permission.USE_FULL_SCREEN_INTENT" />
-    <uses-permission android:name="android.permission.POST_NOTIFICATIONS" />
-    <uses-permission android:name="android.permission.REQUEST_IGNORE_BATTERY_OPTIMIZATIONS" />
+on:
+  push:
+    branches: [ main ]
+  workflow_dispatch:
 
-    <application
-        android:allowBackup="true"
-        android:icon="@mipmap/ic_launcher"
-        android:label="@string/app_name"
-        android:roundIcon="@mipmap/ic_launcher_round"
-        android:supportsRtl="true"
-        android:theme="@style/AppTheme"
-        android:usesCleartextTraffic="true">
+jobs:
+  build:
+    runs-on: ubuntu-latest
 
-        <activity
-            android:name="com.bvdhytb.nhacthuoc.MainActivity"
-            android:exported="true"
-            android:launchMode="singleTask"
-            android:screenOrientation="portrait"
-            android:showWhenLocked="true"
-            android:turnScreenOn="true"
-            android:configChanges="orientation|keyboardHidden|keyboard|screenSize|locale|smallestScreenSize|screenLayout|uiMode"
-            android:theme="@style/AppTheme.NoActionBarLaunch">
-            <intent-filter>
-                <action android:name="android.intent.action.MAIN" />
-                <category android:name="android.intent.category.LAUNCHER" />
-            </intent-filter>
-        </activity>
+    steps:
+    - name: Checkout
+      uses: actions/checkout@v4
 
-        <receiver
-            android:name="com.bvdhytb.nhacthuoc.AlarmReceiver"
-            android:enabled="true"
-            android:exported="false" />
+    - name: Set up JDK 17
+      uses: actions/setup-java@v4
+      with:
+        java-version: '17'
+        distribution: 'temurin'
 
-        <receiver
-            android:name="com.bvdhytb.nhacthuoc.BootReceiver"
-            android:enabled="true"
-            android:exported="true">
-            <intent-filter>
-                <action android:name="android.intent.action.BOOT_COMPLETED" />
-            </intent-filter>
-        </receiver>
+    - name: Set up Android SDK
+      uses: android-actions/setup-android@v3
 
-        <service
-            android:name="com.bvdhytb.nhacthuoc.AlarmService"
-            android:enabled="true"
-            android:exported="false"
-            android:foregroundServiceType="mediaPlayback" />
+    - name: Fix icon filenames
+      run: |
+        # Đổi tên file icon về đúng ic_launcher.png
+        for density in mdpi hdpi xhdpi xxhdpi xxxhdpi; do
+          DIR="android/app/src/main/res/mipmap-${density}"
+          # Tìm file bất kỳ .png trong thư mục và đổi tên thành ic_launcher.png
+          for f in "$DIR"/*.png; do
+            base=$(basename "$f")
+            if [ "$base" != "ic_launcher.png" ] && [ "$base" != "ic_launcher_round.png" ]; then
+              cp "$f" "$DIR/ic_launcher.png"
+              cp "$f" "$DIR/ic_launcher_round.png"
+              echo "Fixed $density: $base → ic_launcher.png"
+            fi
+          done
+        done
 
-    </application>
-</manifest>
+    - name: Copy web assets to Android
+      run: |
+        mkdir -p android/app/src/main/assets/public
+        if [ -d "pw4" ]; then
+          cp -r pw4/. android/app/src/main/assets/public/
+          echo "Copied from pw4 folder"
+        fi
+
+    - name: Setup Gradle
+      uses: gradle/actions/setup-gradle@v3
+      with:
+        gradle-version: '8.4'
+
+    - name: Build Debug APK
+      run: |
+        cd android
+        gradle assembleDebug
+
+    - name: Upload APK
+      uses: actions/upload-artifact@v4
+      with:
+        name: BVDHYTB-debug-apk
+        path: android/app/build/outputs/apk/debug/app-debug.apk
+        retention-days: 90
