@@ -10,7 +10,7 @@ jobs:
     runs-on: ubuntu-latest
 
     steps:
-    - name: Checkout code
+    - name: Checkout
       uses: actions/checkout@v4
 
     - name: Set up JDK 17
@@ -19,66 +19,42 @@ jobs:
         java-version: '17'
         distribution: 'temurin'
 
-    - name: Download app icon from website
+    - name: Download app icon
       run: |
-        # Tải icon 512px từ website
-        curl -sL "https://bvdhytb-nhacthuoc.pages.dev/icon-512.png" -o /tmp/icon-512.png
-        
-        # Resize cho từng density bằng ImageMagick (có sẵn trên ubuntu-latest)
-        for size_density in "48:mdpi" "72:hdpi" "96:xhdpi" "144:xxhdpi" "192:xxxhdpi"; do
-          SIZE=$(echo $size_density | cut -d: -f1)
-          DENSITY=$(echo $size_density | cut -d: -f2)
-          DIR="app/src/main/res/mipmap-${DENSITY}"
-          mkdir -p "$DIR"
-          convert /tmp/icon-512.png -resize ${SIZE}x${SIZE} "$DIR/ic_launcher.png"
-          cp "$DIR/ic_launcher.png" "$DIR/ic_launcher_round.png"
-          # Notification icon (white silhouette)
-          convert /tmp/icon-512.png -resize ${SIZE}x${SIZE} -colorspace Gray -threshold 50% -negate "$DIR/ic_notification.png"
+        curl -sL "https://bvdhytb-nhacthuoc.pages.dev/icon-512.png" -o /tmp/icon.png 2>/dev/null || true
+        if [ -f /tmp/icon.png ] && [ $(stat -c%s /tmp/icon.png) -gt 1000 ]; then
+          for density_size in "mdpi:48" "hdpi:72" "xhdpi:96" "xxhdpi:144" "xxxhdpi:192"; do
+            DENSITY=$(echo $density_size | cut -d: -f1)
+            SIZE=$(echo $density_size | cut -d: -f2)
+            DIR="android/app/src/main/res/mipmap-${DENSITY}"
+            mkdir -p "$DIR"
+            convert /tmp/icon.png -resize ${SIZE}x${SIZE} "$DIR/ic_launcher.png" 2>/dev/null || true
+            cp "$DIR/ic_launcher.png" "$DIR/ic_launcher_round.png" 2>/dev/null || true
+          done
+        fi
+
+    - name: Copy web assets to Android
+      run: |
+        mkdir -p android/app/src/main/assets/public
+        for f in index.html app.js app.css sw.js push-manager.js manifest.webmanifest icon-192.png icon-512.png apple-touch-icon.png; do
+          [ -f "$f" ] && cp "$f" android/app/src/main/assets/public/ && echo "Copied $f"
         done
-        echo "✓ Icons resized for all densities"
+        [ -d ".well-known" ] && cp -r .well-known android/app/src/main/assets/public/ || true
 
     - name: Generate Gradle Wrapper
       run: |
+        cd android
         gradle wrapper --gradle-version 8.4
         chmod +x ./gradlew
 
-    - name: Build Release APK
-      run: ./gradlew assembleRelease
-
-    - name: Sign APK
-      uses: r0adkll/sign-android-release@v1
-      id: sign_app
-      with:
-        releaseDirectory: app/build/outputs/apk/release
-        signingKeyBase64: ${{ secrets.SIGNING_KEY }}
-        alias: ${{ secrets.KEY_ALIAS }}
-        keyStorePassword: ${{ secrets.KEY_STORE_PASSWORD }}
-        keyPassword: ${{ secrets.KEY_PASSWORD }}
-      env:
-        BUILD_TOOLS_VERSION: "34.0.0"
+    - name: Build Debug APK
+      run: |
+        cd android
+        ./gradlew assembleDebug
 
     - name: Upload APK
       uses: actions/upload-artifact@v4
       with:
-        name: BVDHYTB-signed-apk
-        path: ${{ steps.sign_app.outputs.signedReleaseFile }}
+        name: BVDHYTB-debug-apk
+        path: android/app/build/outputs/apk/debug/app-debug.apk
         retention-days: 90
-
-    - name: Create Release
-      if: github.ref == 'refs/heads/main'
-      uses: softprops/action-gh-release@v1
-      with:
-        tag_name: v${{ github.run_number }}
-        name: "BVDHYTB v${{ github.run_number }}"
-        files: ${{ steps.sign_app.outputs.signedReleaseFile }}
-        body: |
-          ## BVĐHYTB - Ứng dụng nhắc dùng thuốc
-          APK tự động build từ commit ${{ github.sha }}
-          
-          ### Tính năng báo thức:
-          - Rung dồn dập + kêu âm thanh báo thức liên tục
-          - Hoạt động kể cả khi tắt màn hình, đóng app
-          - Hiện trên màn hình khóa
-          - Tự tắt sau 3 phút nếu không phản hồi
-      env:
-        GITHUB_TOKEN: ${{ secrets.GITHUB_TOKEN }}
