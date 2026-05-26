@@ -12,6 +12,6 @@
     "@capacitor/cli": "^6.0.0"
   },
   "scripts": {
-    "build": "echo 'Web build skipped'"
+    "build": "npx cap add android"
   }
 }
