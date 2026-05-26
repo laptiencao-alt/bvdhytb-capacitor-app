@@ -22,7 +22,20 @@ jobs:
     - name: Set up Android SDK
       uses: android-actions/setup-android@v3
 
-    - name: Download app icon
+    - name: Copy web assets to Android
+      run: |
+        mkdir -p android/app/src/main/assets/public
+        # Copy từ thư mục pw4 (web app nằm ở đây)
+        if [ -d "pw4" ]; then
+          cp -r pw4/. android/app/src/main/assets/public/
+          echo "Copied from pw4 folder"
+          ls android/app/src/main/assets/public/
+        else
+          echo "ERROR: pw4 folder not found!"
+          ls -la
+        fi
+
+    - name: Download and resize app icon
       run: |
         curl -sL "https://bvdhytb-nhacthuoc.pages.dev/icon-512.png" -o /tmp/icon.png 2>/dev/null || true
         if [ -f /tmp/icon.png ] && [ $(stat -c%s /tmp/icon.png) -gt 1000 ]; then
@@ -34,16 +47,8 @@ jobs:
             convert /tmp/icon.png -resize ${SIZE}x${SIZE} "$DIR/ic_launcher.png" 2>/dev/null || true
             cp "$DIR/ic_launcher.png" "$DIR/ic_launcher_round.png" 2>/dev/null || true
           done
-          echo "Icons downloaded"
+          echo "Icons resized"
         fi
-
-    - name: Copy web assets to Android
-      run: |
-        mkdir -p android/app/src/main/assets/public
-        for f in index.html app.js app.css sw.js push-manager.js manifest.webmanifest icon-192.png icon-512.png apple-touch-icon.png; do
-          [ -f "$f" ] && cp "$f" android/app/src/main/assets/public/ && echo "Copied $f"
-        done
-        [ -d ".well-known" ] && cp -r .well-known android/app/src/main/assets/public/ || true
 
     - name: Setup Gradle
       uses: gradle/actions/setup-gradle@v3
