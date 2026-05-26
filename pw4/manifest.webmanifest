@@ -1,0 +1,30 @@
+{
+  "id": "medreminder-tbmuh",
+  "name": "BVĐHYTB - Ứng dụng nhắc thuốc",
+  "short_name": "BVĐHYTB",
+  "description": "Ứng dụng nhắc thuốc thông minh cho người bệnh mạn tính - BV Đại học Y Thái Bình",
+  "lang": "vi",
+  "dir": "ltr",
+  "start_url": "/",
+  "scope": "/",
+  "display": "standalone",
+  "orientation": "portrait",
+  "background_color": "#0E2A56",
+  "theme_color": "#0E2A56",
+  "categories": ["medical", "health"],
+  "prefer_related_applications": false,
+  "icons": [
+    { "src": "/icon-192.png", "sizes": "192x192", "type": "image/png", "purpose": "any" },
+    { "src": "/icon-192.png", "sizes": "192x192", "type": "image/png", "purpose": "maskable" },
+    { "src": "/icon-512.png", "sizes": "512x512", "type": "image/png", "purpose": "any" },
+    { "src": "/icon-512.png", "sizes": "512x512", "type": "image/png", "purpose": "maskable" }
+  ],
+  "shortcuts": [
+    {
+      "name": "Lịch uống thuốc hôm nay",
+      "short_name": "Hôm nay",
+      "url": "/",
+      "icons": [{ "src": "/icon-192.png", "sizes": "192x192" }]
+    }
+  ]
+}
