@@ -1,8 +1,0 @@
-{
-  "appId": "com.bvdhytb.nhacthuoc",
-  "appName": "BVDHYTB",
-  "webDir": ".",
-  "android": {
-    "allowMixedContent": false
-  }
-}
