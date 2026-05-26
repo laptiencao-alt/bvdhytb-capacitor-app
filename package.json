@@ -4,12 +4,12 @@
   "description": "Ung dung nhac dung thuoc",
   "main": "index.html",
   "dependencies": {
-    "@capacitor/core": "^5.0.0",
-    "@capacitor/android": "^5.0.0",
-    "@capacitor/local-notifications": "^5.0.0"
+    "@capacitor/core": "^6.0.0",
+    "@capacitor/android": "^6.0.0",
+    "@capacitor/local-notifications": "^6.0.0"
   },
   "devDependencies": {
-    "@capacitor/cli": "^5.0.0"
+    "@capacitor/cli": "^6.0.0"
   },
   "scripts": {
     "build": "echo 'Skipping web build' && npx cap add android"
