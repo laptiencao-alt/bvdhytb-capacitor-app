@@ -1,6 +1,8 @@
-{
+{{
   "appId": "com.bvdhytb.nhacthuoc",
-  "appName": "Nhac Thuoc Y Thai Binh",
-  "webDir": "pw4",
-  "bundledWebRuntime": false
+  "appName": "BVDHYTB",
+  "webDir": ".",
+  "android": {
+    "allowMixedContent": false
+  }
 }
