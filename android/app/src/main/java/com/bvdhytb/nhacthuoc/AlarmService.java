@@ -192,8 +192,18 @@ public class AlarmService extends Service implements TextToSpeech.OnInitListener
         // Chuông sau 4 giây
         mainHandler.postDelayed(() -> { if (!alarmStopped) startChuong(); }, 4000);
 
-        // Tự tắt sau 3 phút
-        mainHandler.postDelayed(this::stopAlarm, 3 * 60 * 1000);
+        // Tự tắt sau 3 phút nếu không phản hồi, rồi nhắc lại sau 5 phút
+        mainHandler.postDelayed(() -> {
+            if (!alarmStopped) {
+                // Lưu thông tin để nhắc lại
+                String reminderName = medName;
+                String reminderDose = medDose;
+                String reminderNote = medNote;
+                stopAlarm();
+                // Đặt alarm nhắc lại sau 5 phút
+                scheduleSnooze(reminderName, reminderDose, reminderNote, 5 * 60 * 1000);
+            }
+        }, 3 * 60 * 1000);
 
         return START_NOT_STICKY;
     }
@@ -244,6 +254,43 @@ public class AlarmService extends Service implements TextToSpeech.OnInitListener
             else
                 vibrator.vibrate(p, 0);
         }
+    }
+
+    // Đặt alarm nhắc lại sau X milliseconds
+    void scheduleSnooze(String name, String dose, String note, long delayMs) {
+        android.app.AlarmManager am = (android.app.AlarmManager) getSystemService(Context.ALARM_SERVICE);
+        if (am == null) return;
+        Intent intent = new Intent(this, AlarmReceiver.class);
+        intent.putExtra("medName", name);
+        intent.putExtra("medDose", dose);
+        intent.putExtra("medNote", note);
+        intent.putExtra("hour", -2); // -2 = snooze, không lặp lại hàng ngày
+        intent.putExtra("minute", -2);
+        // requestCode đặc biệt cho snooze
+        PendingIntent pi = PendingIntent.getBroadcast(this, 99999, intent,
+            PendingIntent.FLAG_UPDATE_CURRENT | PendingIntent.FLAG_IMMUTABLE);
+        long triggerAt = System.currentTimeMillis() + delayMs;
+        if (Build.VERSION.SDK_INT >= Build.VERSION_CODES.M)
+            am.setExactAndAllowWhileIdle(android.app.AlarmManager.RTC_WAKEUP, triggerAt, pi);
+        else
+            am.setExact(android.app.AlarmManager.RTC_WAKEUP, triggerAt, pi);
+    }
+
+    // Gọi khi MainActivity được mở - tắt âm thanh ngay, giữ notification
+    public static void onAppOpened() {
+        if (instance == null || instance.alarmStopped) return;
+        // Tắt âm thanh + rung ngay lập tức
+        if (instance.tts != null) instance.tts.stop();
+        if (instance.mediaPlayer != null) {
+            try { instance.mediaPlayer.stop(); instance.mediaPlayer.release(); } catch (Exception e) {}
+            instance.mediaPlayer = null;
+        }
+        if (instance.vibrator != null) { instance.vibrator.cancel(); instance.vibrator = null; }
+        instance.alarmStopped = true;
+        // Tắt hoàn toàn sau 30 giây
+        instance.mainHandler.postDelayed(() -> {
+            if (instance != null) instance.stopAlarm();
+        }, 30 * 1000);
     }
 
     void stopAlarm() {
