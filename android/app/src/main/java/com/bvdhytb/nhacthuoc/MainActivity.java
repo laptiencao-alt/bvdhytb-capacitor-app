@@ -19,6 +19,9 @@ import android.webkit.WebSettings;
 import android.webkit.WebView;
 import android.webkit.WebViewClient;
 import android.webkit.PermissionRequest;
+import android.Manifest;
+import android.content.pm.PackageManager;
+import androidx.core.content.ContextCompat;
 
 import androidx.appcompat.app.AppCompatActivity;
 import androidx.core.app.ActivityCompat;
@@ -38,7 +41,13 @@ public class MainActivity extends AppCompatActivity {
 
         if (Build.VERSION.SDK_INT >= Build.VERSION_CODES.TIRAMISU) {
             ActivityCompat.requestPermissions(this,
-                new String[]{android.Manifest.permission.POST_NOTIFICATIONS}, 1);
+                new String[]{
+                    android.Manifest.permission.POST_NOTIFICATIONS,
+                    android.Manifest.permission.CAMERA
+                }, 1);
+        } else {
+            ActivityCompat.requestPermissions(this,
+                new String[]{android.Manifest.permission.CAMERA}, 1);
         }
         requestBatteryExemption();
 
@@ -66,8 +75,20 @@ public class MainActivity extends AppCompatActivity {
 
         webView.setWebChromeClient(new WebChromeClient() {
             @Override
-            public void onPermissionRequest(PermissionRequest request) {
-                request.grant(request.getResources());
+            public void onPermissionRequest(final PermissionRequest request) {
+                // Kiểm tra và cấp quyền camera cho WebView
+                boolean hasCameraPermission = ContextCompat.checkSelfPermission(
+                    MainActivity.this, Manifest.permission.CAMERA)
+                    == PackageManager.PERMISSION_GRANTED;
+                
+                if (hasCameraPermission) {
+                    runOnUiThread(() -> request.grant(request.getResources()));
+                } else {
+                    ActivityCompat.requestPermissions(MainActivity.this,
+                        new String[]{Manifest.permission.CAMERA}, 2);
+                    // Cấp tạm để không bị block
+                    runOnUiThread(() -> request.grant(request.getResources()));
+                }
             }
         });
 
@@ -121,10 +142,33 @@ public class MainActivity extends AppCompatActivity {
         AlarmBridge(Context ctx) { this.ctx = ctx; }
 
         @JavascriptInterface
+        public void scheduleAlarmAt(double timestampMs, int requestCode, String title, String body) {
+            // Đặt alarm tại thời điểm cụ thể (timestamp milliseconds)
+            AlarmManager am = (AlarmManager) ctx.getSystemService(Context.ALARM_SERVICE);
+            if (am == null) return;
+            long triggerAt = (long) timestampMs;
+            if (triggerAt <= System.currentTimeMillis()) return; // Đã qua
+
+            Intent intent = new Intent(ctx, AlarmReceiver.class);
+            intent.putExtra("medName", title != null ? title : "Nhắc hẹn");
+            intent.putExtra("medDose", "");
+            intent.putExtra("medNote", body != null ? body : "");
+            intent.putExtra("hour", -1); // Không lặp lại hàng ngày
+            intent.putExtra("minute", -1);
+            PendingIntent pi = PendingIntent.getBroadcast(ctx, requestCode, intent,
+                PendingIntent.FLAG_UPDATE_CURRENT | PendingIntent.FLAG_IMMUTABLE);
+            if (Build.VERSION.SDK_INT >= Build.VERSION_CODES.M)
+                am.setExactAndAllowWhileIdle(AlarmManager.RTC_WAKEUP, triggerAt, pi);
+            else
+                am.setExact(AlarmManager.RTC_WAKEUP, triggerAt, pi);
+        }
+
+        @JavascriptInterface
         public boolean isAvailable() { return true; }
 
         @JavascriptInterface
         public void scheduleAlarm(int hour, int minute, String name, String dose, String note) {
+            // name/dose có thể chứa nhiều thuốc ngăn cách bởi | (pipe)
             AlarmManager am = (AlarmManager) ctx.getSystemService(Context.ALARM_SERVICE);
             if (am == null) return;
             Intent intent = new Intent(ctx, AlarmReceiver.class);
