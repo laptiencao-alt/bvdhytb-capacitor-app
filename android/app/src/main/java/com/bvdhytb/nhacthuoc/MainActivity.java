@@ -39,6 +39,11 @@ public class MainActivity extends AppCompatActivity {
         super.onCreate(savedInstanceState);
         createNotificationChannel();
 
+        // Nếu mở từ alarm notification → tắt âm thanh AlarmService ngay
+        if (getIntent() != null && getIntent().getBooleanExtra("fromAlarm", false)) {
+            AlarmService.onAppOpened();
+        }
+
         if (Build.VERSION.SDK_INT >= Build.VERSION_CODES.TIRAMISU) {
             ActivityCompat.requestPermissions(this,
                 new String[]{
@@ -94,6 +99,15 @@ public class MainActivity extends AppCompatActivity {
 
         // Load từ assets (file đóng gói trong APK)
         webView.loadUrl("file:///android_asset/public/index.html");
+    }
+
+    @Override
+    protected void onNewIntent(Intent intent) {
+        super.onNewIntent(intent);
+        // Khi app đang mở và có alarm mới → tắt AlarmService ngay
+        if (intent != null && intent.getBooleanExtra("fromAlarm", false)) {
+            AlarmService.onAppOpened();
+        }
     }
 
     @Override
@@ -184,6 +198,7 @@ public class MainActivity extends AppCompatActivity {
             cal.set(Calendar.HOUR_OF_DAY, hour);
             cal.set(Calendar.MINUTE, minute);
             cal.set(Calendar.SECOND, 0);
+            cal.set(Calendar.MILLISECOND, 0); // Fix lệch giờ
             if (cal.getTimeInMillis() <= System.currentTimeMillis())
                 cal.add(Calendar.DAY_OF_YEAR, 1);
             if (Build.VERSION.SDK_INT >= Build.VERSION_CODES.M)
