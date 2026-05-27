@@ -33,21 +33,24 @@ public class AlarmService extends Service implements TextToSpeech.OnInitListener
     PowerManager.WakeLock wakeLock;
     TextToSpeech tts;
     boolean ttsReady = false;
-    List<String> ttsMedList = new ArrayList<>(); // Danh sách thuốc cần đọc
-    int ttsCurrentIndex = 0;
-    int ttsRepeatCount = 0;
-    static final int TTS_MAX_REPEAT = 3; // Lặp lại 3 vòng
+    List<String> ttsList = new ArrayList<>();
+    int ttsIndex = 0;
+    int ttsRound = 0;
+    static final int MAX_ROUNDS = 3;
+    boolean alarmStopped = false;
+    android.os.Handler mainHandler;
 
     public static void stopAlarmFromApp() {
         if (instance != null) instance.stopAlarm();
     }
     public static boolean isAlarmPlaying() {
-        return instance != null && (instance.mediaPlayer != null || instance.ttsReady);
+        return instance != null && !instance.alarmStopped;
     }
 
     @Override
     public void onCreate() {
         super.onCreate();
+        mainHandler = new android.os.Handler(getMainLooper());
         tts = new TextToSpeech(this, this);
     }
 
@@ -62,29 +65,28 @@ public class AlarmService extends Service implements TextToSpeech.OnInitListener
                 @Override public void onStart(String id) {}
                 @Override
                 public void onDone(String id) {
-                    if (instance == null) return;
-                    // Chuyển sang thuốc tiếp theo
-                    ttsCurrentIndex++;
-                    if (ttsCurrentIndex < ttsMedList.size()) {
-                        // Còn thuốc trong danh sách → đọc tiếp
-                        try { Thread.sleep(1000); } catch (Exception e) {}
-                        speak(ttsMedList.get(ttsCurrentIndex));
+                    if (alarmStopped) return;
+                    ttsIndex++;
+                    if (ttsIndex < ttsList.size()) {
+                        mainHandler.postDelayed(() -> {
+                            if (!alarmStopped) speak(ttsList.get(ttsIndex));
+                        }, 800);
                     } else {
-                        // Đọc xong 1 vòng → lặp lại nếu chưa đủ số lần
-                        ttsRepeatCount++;
-                        if (ttsRepeatCount < TTS_MAX_REPEAT && instance != null) {
-                            ttsCurrentIndex = 0;
-                            try { Thread.sleep(2000); } catch (Exception e) {}
-                            if (instance != null) speak(ttsMedList.get(0));
+                        ttsRound++;
+                        if (ttsRound < MAX_ROUNDS && !alarmStopped) {
+                            ttsIndex = 0;
+                            mainHandler.postDelayed(() -> {
+                                if (!alarmStopped) speak(ttsList.get(0));
+                            }, 2000);
                         }
                     }
                 }
                 @Override public void onError(String id) {}
             });
             ttsReady = true;
-            if (!ttsMedList.isEmpty()) {
+            if (!ttsList.isEmpty() && !alarmStopped) {
                 setMaxVolume();
-                speak(ttsMedList.get(0));
+                speak(ttsList.get(0));
             }
         }
     }
@@ -95,30 +97,23 @@ public class AlarmService extends Service implements TextToSpeech.OnInitListener
             stopAlarm();
             return START_NOT_STICKY;
         }
-        // Action OPEN_APP: mở app rồi tắt chuông khi bấm nút trên notification
-        if (intent != null && "OPEN_APP".equals(intent.getAction())) {
-            // Mở MainActivity
-            Intent openIntent = new Intent(this, MainActivity.class);
-            openIntent.setFlags(Intent.FLAG_ACTIVITY_NEW_TASK | Intent.FLAG_ACTIVITY_CLEAR_TOP);
-            openIntent.putExtra("fromAlarm", true);
-            startActivity(openIntent);
-            // KHÔNG tắt chuông - chỉ tắt khi bấm "Đã dùng" trong app
+
+        // Nếu alarm đang chạy rồi → bỏ qua, không tạo thêm
+        if (instance != null && !instance.alarmStopped) {
             return START_NOT_STICKY;
         }
 
         instance = this;
+        alarmStopped = false;
 
-        // Lấy danh sách thuốc (nhiều thuốc cùng giờ được gửi dưới dạng JSON array)
-        String medsJson = intent != null ? intent.getStringExtra("medsJson") : null;
         String medName = intent != null ? intent.getStringExtra("medName") : "Thuốc";
         String medDose = intent != null ? intent.getStringExtra("medDose") : "";
         String medNote = intent != null ? intent.getStringExtra("medNote") : "";
-
         if (medName == null) medName = "Thuốc";
         if (medDose == null) medDose = "";
         if (medNote == null) medNote = "";
 
-        // Giữ CPU thức
+        // WakeLock
         PowerManager pm = (PowerManager) getSystemService(Context.POWER_SERVICE);
         if (pm != null) {
             wakeLock = pm.newWakeLock(
@@ -128,25 +123,30 @@ public class AlarmService extends Service implements TextToSpeech.OnInitListener
         }
         setMaxVolume();
 
-        // Tạo nội dung notification
-        String body = medName;
-        if (!medDose.isEmpty()) body += " - " + medDose;
-        if (!medNote.isEmpty()) body += "\n" + medNote;
-        body += "\n\nBV Đại học Y Thái Bình\nMở app để xác nhận đã dùng thuốc";
+        // Tạo notification body
+        StringBuilder bodyBuilder = new StringBuilder();
+        if (medName.contains("|")) {
+            String[] names = medName.split("\\|");
+            String[] doses = medDose.split("\\|");
+            for (int i = 0; i < names.length; i++) {
+                bodyBuilder.append("• ").append(names[i].trim());
+                if (i < doses.length && !doses[i].trim().isEmpty())
+                    bodyBuilder.append(" - ").append(doses[i].trim());
+                bodyBuilder.append("\n");
+            }
+        } else {
+            bodyBuilder.append(medName);
+            if (!medDose.isEmpty()) bodyBuilder.append(" - ").append(medDose);
+        }
+        bodyBuilder.append("\nBV Đại học Y Thái Bình");
+        String body = bodyBuilder.toString();
 
-        // Bấm vào notification → mở app → bấm "Đã dùng" trong app → tắt chuông
+        // Notification: bấm vào → mở app
         Intent tapIntent = new Intent(this, MainActivity.class);
         tapIntent.setFlags(Intent.FLAG_ACTIVITY_NEW_TASK | Intent.FLAG_ACTIVITY_CLEAR_TOP);
         tapIntent.putExtra("fromAlarm", true);
-        PendingIntent tapPi = PendingIntent.getActivity(
-            this, 0, tapIntent,
+        PendingIntent tapPi = PendingIntent.getActivity(this, 0, tapIntent,
             PendingIntent.FLAG_IMMUTABLE | PendingIntent.FLAG_UPDATE_CURRENT);
-
-        // Nút tắt nhanh (chỉ tắt chuông, không mở app)
-        Intent stopIntent = new Intent(this, AlarmService.class);
-        stopIntent.setAction("STOP");
-        PendingIntent stopPi = PendingIntent.getService(
-            this, 1, stopIntent, PendingIntent.FLAG_IMMUTABLE);
 
         Notification notif = new NotificationCompat.Builder(this, CHANNEL_ID)
             .setSmallIcon(android.R.drawable.ic_lock_idle_alarm)
@@ -156,50 +156,44 @@ public class AlarmService extends Service implements TextToSpeech.OnInitListener
             .setPriority(NotificationCompat.PRIORITY_MAX)
             .setCategory(NotificationCompat.CATEGORY_ALARM)
             .setVisibility(NotificationCompat.VISIBILITY_PUBLIC)
-            .setContentIntent(tapPi)  // Bấm vào → mở app
-            .addAction(android.R.drawable.ic_media_pause, "Tắt chuông", stopPi)
+            .setContentIntent(tapPi)
             .setOngoing(true)
             .setAutoCancel(false)
             .setFullScreenIntent(tapPi, true)
             .build();
         startForeground(NOTIF_ID, notif);
 
+        // Rung
         startVibration();
 
-        // Xây dựng danh sách TTS cho từng thuốc
-        ttsMedList.clear();
-        ttsCurrentIndex = 0;
-        ttsRepeatCount = 0;
-
-        // Câu mở đầu
-        ttsMedList.add("Đã đến giờ dùng thuốc.");
-
-        // Đọc từng thuốc (medName có thể chứa nhiều thuốc ngăn cách bởi |)
+        // Xây TTS danh sách
+        ttsList.clear();
+        ttsIndex = 0;
+        ttsRound = 0;
+        ttsList.add("Đã đến giờ dùng thuốc.");
         if (medName.contains("|")) {
             String[] names = medName.split("\\|");
             String[] doses = medDose.split("\\|");
             for (int i = 0; i < names.length; i++) {
-                String n = names[i].trim();
-                String d = (i < doses.length) ? doses[i].trim() : "";
-                String speech = n + (d.isEmpty() ? "" : ". " + d);
-                ttsMedList.add(speech);
+                String s = names[i].trim();
+                if (i < doses.length && !doses[i].trim().isEmpty())
+                    s += ". " + doses[i].trim();
+                ttsList.add(s);
             }
         } else {
-            String speech = medName + (medDose.isEmpty() ? "" : ". " + medDose);
-            ttsMedList.add(speech);
+            String s = medName;
+            if (!medDose.isEmpty()) s += ". " + medDose;
+            ttsList.add(s);
         }
+        ttsList.add("Bệnh viện Đại học Y Thái Bình.");
 
-        ttsMedList.add("Bệnh viện Đại học Y Thái Bình.");
+        if (ttsReady && !alarmStopped) speak(ttsList.get(0));
 
-        if (ttsReady) {
-            speak(ttsMedList.get(0));
-        }
-
-        // Phát chuông sau 3 giây
-        new android.os.Handler(getMainLooper()).postDelayed(this::startChuong, 3000);
+        // Chuông sau 4 giây
+        mainHandler.postDelayed(() -> { if (!alarmStopped) startChuong(); }, 4000);
 
         // Tự tắt sau 3 phút
-        new android.os.Handler(getMainLooper()).postDelayed(this::stopAlarm, 3 * 60 * 1000);
+        mainHandler.postDelayed(this::stopAlarm, 3 * 60 * 1000);
 
         return START_NOT_STICKY;
     }
@@ -207,17 +201,21 @@ public class AlarmService extends Service implements TextToSpeech.OnInitListener
     void setMaxVolume() {
         AudioManager am = (AudioManager) getSystemService(Context.AUDIO_SERVICE);
         if (am != null) {
-            am.setStreamVolume(AudioManager.STREAM_ALARM, am.getStreamMaxVolume(AudioManager.STREAM_ALARM), 0);
-            am.setStreamVolume(AudioManager.STREAM_MUSIC, am.getStreamMaxVolume(AudioManager.STREAM_MUSIC), 0);
+            // Đặt âm lượng 80% thay vì max
+            int alarmMax = am.getStreamMaxVolume(AudioManager.STREAM_ALARM);
+            am.setStreamVolume(AudioManager.STREAM_ALARM, (int)(alarmMax * 0.8), 0);
+            int musicMax = am.getStreamMaxVolume(AudioManager.STREAM_MUSIC);
+            am.setStreamVolume(AudioManager.STREAM_MUSIC, (int)(musicMax * 0.8), 0);
         }
     }
 
     void speak(String text) {
-        if (tts != null && ttsReady) tts.speak(text, TextToSpeech.QUEUE_FLUSH, null, "alarm");
+        if (tts != null && ttsReady && !alarmStopped)
+            tts.speak(text, TextToSpeech.QUEUE_FLUSH, null, "alarm_" + ttsIndex);
     }
 
     void startChuong() {
-        if (mediaPlayer != null) return;
+        if (mediaPlayer != null || alarmStopped) return;
         try {
             Uri uri = RingtoneManager.getDefaultUri(RingtoneManager.TYPE_ALARM);
             if (uri == null) uri = RingtoneManager.getDefaultUri(RingtoneManager.TYPE_RINGTONE);
@@ -240,7 +238,7 @@ public class AlarmService extends Service implements TextToSpeech.OnInitListener
             vibrator = (Vibrator) getSystemService(Context.VIBRATOR_SERVICE);
         }
         if (vibrator != null && vibrator.hasVibrator()) {
-            long[] p = {0,500,300,500,300,500,300,800,500};
+            long[] p = {0, 500, 300, 500, 300, 500, 300, 800, 500};
             if (Build.VERSION.SDK_INT >= Build.VERSION_CODES.O)
                 vibrator.vibrate(VibrationEffect.createWaveform(p, 0));
             else
@@ -249,6 +247,7 @@ public class AlarmService extends Service implements TextToSpeech.OnInitListener
     }
 
     void stopAlarm() {
+        alarmStopped = true;
         if (tts != null) tts.stop();
         if (mediaPlayer != null) {
             try { mediaPlayer.stop(); mediaPlayer.release(); } catch (Exception e) {}
@@ -256,6 +255,7 @@ public class AlarmService extends Service implements TextToSpeech.OnInitListener
         }
         if (vibrator != null) { vibrator.cancel(); vibrator = null; }
         if (wakeLock != null && wakeLock.isHeld()) wakeLock.release();
+        mainHandler.removeCallbacksAndMessages(null);
         instance = null;
         stopForeground(true);
         stopSelf();
