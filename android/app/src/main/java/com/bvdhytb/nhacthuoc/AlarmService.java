@@ -134,20 +134,19 @@ public class AlarmService extends Service implements TextToSpeech.OnInitListener
         if (!medNote.isEmpty()) body += "\n" + medNote;
         body += "\n\nBV Đại học Y Thái Bình\nMở app để xác nhận đã dùng thuốc";
 
-        // Nút "Mở app" → bắt buộc vào app bấm "Đã dùng" mới tắt chuông
-        Intent openAppIntent = new Intent(this, AlarmService.class);
-        openAppIntent.setAction("OPEN_APP");
-        PendingIntent openAppPi = PendingIntent.getService(
-            this, 2, openAppIntent,
-            PendingIntent.FLAG_IMMUTABLE | PendingIntent.FLAG_UPDATE_CURRENT);
-
-        // Bấm vào notification cũng mở app
+        // Bấm vào notification → mở app → bấm "Đã dùng" trong app → tắt chuông
         Intent tapIntent = new Intent(this, MainActivity.class);
         tapIntent.setFlags(Intent.FLAG_ACTIVITY_NEW_TASK | Intent.FLAG_ACTIVITY_CLEAR_TOP);
         tapIntent.putExtra("fromAlarm", true);
         PendingIntent tapPi = PendingIntent.getActivity(
             this, 0, tapIntent,
             PendingIntent.FLAG_IMMUTABLE | PendingIntent.FLAG_UPDATE_CURRENT);
+
+        // Nút tắt nhanh (chỉ tắt chuông, không mở app)
+        Intent stopIntent = new Intent(this, AlarmService.class);
+        stopIntent.setAction("STOP");
+        PendingIntent stopPi = PendingIntent.getService(
+            this, 1, stopIntent, PendingIntent.FLAG_IMMUTABLE);
 
         Notification notif = new NotificationCompat.Builder(this, CHANNEL_ID)
             .setSmallIcon(android.R.drawable.ic_lock_idle_alarm)
@@ -157,9 +156,8 @@ public class AlarmService extends Service implements TextToSpeech.OnInitListener
             .setPriority(NotificationCompat.PRIORITY_MAX)
             .setCategory(NotificationCompat.CATEGORY_ALARM)
             .setVisibility(NotificationCompat.VISIBILITY_PUBLIC)
-            .setContentIntent(tapPi)
-            // Nút chỉ mở app, KHÔNG tắt chuông
-            .addAction(android.R.drawable.ic_menu_view, "Mở app xác nhận", openAppPi)
+            .setContentIntent(tapPi)  // Bấm vào → mở app
+            .addAction(android.R.drawable.ic_media_pause, "Tắt chuông", stopPi)
             .setOngoing(true)
             .setAutoCancel(false)
             .setFullScreenIntent(tapPi, true)
