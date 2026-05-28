@@ -85,7 +85,7 @@ public class MainActivity extends AppCompatActivity {
                 boolean hasCameraPermission = ContextCompat.checkSelfPermission(
                     MainActivity.this, Manifest.permission.CAMERA)
                     == PackageManager.PERMISSION_GRANTED;
-                
+
                 if (hasCameraPermission) {
                     runOnUiThread(() -> request.grant(request.getResources()));
                 } else {
@@ -110,6 +110,7 @@ public class MainActivity extends AppCompatActivity {
         }
     }
 
+    @SuppressWarnings("deprecation")
     @Override
     public void onBackPressed() {
         if (webView.canGoBack()) webView.goBack();
