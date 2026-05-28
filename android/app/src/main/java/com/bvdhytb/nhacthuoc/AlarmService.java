@@ -113,6 +113,11 @@ public class AlarmService extends Service implements TextToSpeech.OnInitListener
         if (medDose == null) medDose = "";
         if (medNote == null) medNote = "";
 
+        // Tạo biến final để dùng trong lambda
+        final String fMedName = medName;
+        final String fMedDose = medDose;
+        final String fMedNote = medNote;
+
         // WakeLock
         PowerManager pm = (PowerManager) getSystemService(Context.POWER_SERVICE);
         if (pm != null) {
@@ -125,9 +130,9 @@ public class AlarmService extends Service implements TextToSpeech.OnInitListener
 
         // Tạo notification body
         StringBuilder bodyBuilder = new StringBuilder();
-        if (medName.contains("|")) {
-            String[] names = medName.split("\\|");
-            String[] doses = medDose.split("\\|");
+        if (fMedName.contains("|")) {
+            String[] names = fMedName.split("\\|");
+            String[] doses = fMedDose.split("\\|");
             for (int i = 0; i < names.length; i++) {
                 bodyBuilder.append("• ").append(names[i].trim());
                 if (i < doses.length && !doses[i].trim().isEmpty())
@@ -135,8 +140,8 @@ public class AlarmService extends Service implements TextToSpeech.OnInitListener
                 bodyBuilder.append("\n");
             }
         } else {
-            bodyBuilder.append(medName);
-            if (!medDose.isEmpty()) bodyBuilder.append(" - ").append(medDose);
+            bodyBuilder.append(fMedName);
+            if (!fMedDose.isEmpty()) bodyBuilder.append(" - ").append(fMedDose);
         }
         bodyBuilder.append("\nBV Đại học Y Thái Bình");
         String body = bodyBuilder.toString();
@@ -171,9 +176,9 @@ public class AlarmService extends Service implements TextToSpeech.OnInitListener
         ttsIndex = 0;
         ttsRound = 0;
         ttsList.add("Đã đến giờ dùng thuốc.");
-        if (medName.contains("|")) {
-            String[] names = medName.split("\\|");
-            String[] doses = medDose.split("\\|");
+        if (fMedName.contains("|")) {
+            String[] names = fMedName.split("\\|");
+            String[] doses = fMedDose.split("\\|");
             for (int i = 0; i < names.length; i++) {
                 String s = names[i].trim();
                 if (i < doses.length && !doses[i].trim().isEmpty())
@@ -181,8 +186,8 @@ public class AlarmService extends Service implements TextToSpeech.OnInitListener
                 ttsList.add(s);
             }
         } else {
-            String s = medName;
-            if (!medDose.isEmpty()) s += ". " + medDose;
+            String s = fMedName;
+            if (!fMedDose.isEmpty()) s += ". " + fMedDose;
             ttsList.add(s);
         }
         ttsList.add("Bệnh viện Đại học Y Thái Bình.");
@@ -195,13 +200,9 @@ public class AlarmService extends Service implements TextToSpeech.OnInitListener
         // Tự tắt sau 3 phút nếu không phản hồi, rồi nhắc lại sau 5 phút
         mainHandler.postDelayed(() -> {
             if (!alarmStopped) {
-                // Lưu thông tin để nhắc lại
-                String reminderName = medName;
-                String reminderDose = medDose;
-                String reminderNote = medNote;
                 stopAlarm();
                 // Đặt alarm nhắc lại sau 5 phút
-                scheduleSnooze(reminderName, reminderDose, reminderNote, 5 * 60 * 1000);
+                scheduleSnooze(fMedName, fMedDose, fMedNote, 5 * 60 * 1000);
             }
         }, 3 * 60 * 1000);
 
