@@ -17639,7 +17639,7 @@ function speakReminder(medName) {
 
 // Bắt đầu nhắc nhở liên tục: chuông + rung + giọng nói lặp lại cho đến khi user phản hồi
 function startAlerting() {
-  // Trong APK → AlarmService đã lo chuông/rung/TTS, không cần web alert
+  // Trong APK → AlarmService đã lo chuông/rung/TTS, chỉ hiện overlay
   if (window.AndroidAlarm && window.AndroidAlarm.isAvailable()) return;
   playChime();
   vibratePhone();
