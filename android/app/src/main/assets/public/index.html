@@ -17640,7 +17640,6 @@ function speakReminder(medName) {
 // Bắt đầu nhắc nhở liên tục: chuông + rung + giọng nói lặp lại cho đến khi user phản hồi
 function startAlerting() {
   // Trong APK → AlarmService đã lo chuông/rung/TTS, chỉ hiện overlay
-  // Check nhiều cách: bridge có thể chưa inject kịp khi WebView vừa mở
   if (window.AndroidAlarm || document.URL.startsWith('file:///android_asset')) return;
   playChime();
   vibratePhone();
@@ -17764,7 +17763,7 @@ function confirmReminder() {
   }
 
   if (doseKey) {
-    // Kiểm tra thời gian để phân loại đúng giờ hay muộn
+    // Lấy giờ từ key
     const medId = doseKey.split('-')[0];
     const time = doseKey.substring(medId.length + 1);
     const [h, m] = time.split(':').map(Number);
@@ -17772,21 +17771,40 @@ function confirmReminder() {
     const now = new Date();
     const nowMin = now.getHours() * 60 + now.getMinutes();
     const diff = nowMin - schedMin;
+    const todayKey = getTodayKey();
+
+    // *** FIX: Đánh dấu TẤT CẢ thuốc cùng giờ là taken ***
+    if (medications && medications.length > 0) {
+      medications.forEach(med => {
+        if (med.times && med.times.includes(time)) {
+          const k = `${med.id}-${time}`;
+          if (diff > 20) {
+            doseStatus[k] = 'taken_late';
+            if (typeof logDoseAction === 'function') logDoseAction(k, 'taken_late');
+          } else {
+            doseStatus[k] = 'taken';
+            if (typeof logDoseAction === 'function') logDoseAction(k, 'taken');
+          }
+          _triggeredDoses.add(`${todayKey}-${k}`);
+        }
+      });
+    }
 
     if (diff > 20) {
-      doseStatus[doseKey] = 'taken_late';
-      if (typeof logDoseAction === 'function') logDoseAction(doseKey, 'taken_late');
-      showToast('Đã ghi nhận uống muộn ⚠️', 'success');
+      showToast('Đã ghi nhận dùng muộn ⚠️', 'success');
     } else {
-      doseStatus[doseKey] = 'taken';
-      if (typeof logDoseAction === 'function') logDoseAction(doseKey, 'taken');
       showToast('Đã ghi nhận dùng thuốc 💊', 'success');
     }
     renderHomeDoses();
+    if (typeof saveToStorage === 'function') saveToStorage();
   }
 
   _currentReminderDoseKey = null;
   document.getElementById('reminderOverlay').classList.remove('active');
+  // Tắt chuông/rung Android nếu đang kêu
+  if (window.AndroidAlarm && window.AndroidAlarm.stopAlarm) {
+    window.AndroidAlarm.stopAlarm();
+  }
 }
 
 function snoozeReminder() {
@@ -19083,6 +19101,10 @@ const _triggeredDoses = new Set();
 function checkDueDoses() {
   if (!medications || medications.length === 0) return;
 
+  // Nếu overlay nhắc thuốc đang hiện → không trigger thêm
+  const overlay = document.getElementById('reminderOverlay');
+  if (overlay && overlay.classList.contains('active')) return;
+
   const now = new Date();
   const todayKey = getTodayKey();
   const nowH = now.getHours();
@@ -19126,8 +19148,12 @@ function checkDueDoses() {
 
   // Nếu có liều đến giờ và app đang ở foreground → kích hoạt nhắc nhở
   if (dueDose && !document.hidden) {
-    // Đánh dấu đã trigger SAU KHI thực sự hiện nhắc nhở
-    _triggeredDoses.add(dueDose.triggerKey);
+    // Đánh dấu TẤT CẢ thuốc cùng giờ đã trigger (tránh trigger từng thuốc riêng lẻ)
+    medications.forEach(med => {
+      if (med.times && med.times.includes(dueDose.time)) {
+        _triggeredDoses.add(`${todayKey}-${med.id}-${dueDose.time}`);
+      }
+    });
     triggerReminder(dueDose);
   }
 }
@@ -19164,37 +19190,29 @@ function triggerReminder(dose) {
 // Khi chạy trong APK Capacitor, đặt báo thức hệ thống Android
 // Hoạt động kể cả khi tắt màn hình, đóng app hoàn toàn
 function syncAndroidAlarms() {
-  // Kiểm tra đang chạy trong APK hay trình duyệt thường
   if (!window.AndroidAlarm || !window.AndroidAlarm.isAvailable()) return;
 
   try {
-    // Xóa tất cả alarm cũ trước
     window.AndroidAlarm.cancelAllAlarms();
 
-    // Đặt alarm cho từng thuốc
     if (!medications || medications.length === 0) return;
 
     // Gộp thuốc cùng giờ bằng dấu | để AlarmService đọc hết 1 lần
-    const timeMap = {}; // key: "HH:MM" → {names: [], doses: [], notes: []}
+    const timeMap = {};
     medications.forEach(med => {
       if (!med.times || med.times.length === 0) return;
       med.times.forEach(t => {
         const [h, m] = t.split(':').map(Number);
         if (isNaN(h) || isNaN(m)) return;
-        const key = t; // "HH:MM"
-        if (!timeMap[key]) timeMap[key] = { h, m, names: [], doses: [], notes: [] };
-        timeMap[key].names.push(med.name || 'Thuốc');
-        timeMap[key].doses.push(med.dose || '');
-        timeMap[key].notes.push(med.note || '');
+        if (!timeMap[t]) timeMap[t] = { h, m, names: [], doses: [], notes: [] };
+        timeMap[t].names.push(med.name || 'Thuốc');
+        timeMap[t].doses.push(med.dose || '');
+        timeMap[t].notes.push(med.note || '');
       });
     });
 
-    // Đặt 1 alarm cho mỗi khung giờ, gộp bằng dấu |
     Object.values(timeMap).forEach(slot => {
-      const name = slot.names.join('|');
-      const dose = slot.doses.join('|');
-      const note = slot.notes.join('|');
-      window.AndroidAlarm.scheduleAlarm(slot.h, slot.m, name, dose, note);
+      window.AndroidAlarm.scheduleAlarm(slot.h, slot.m, slot.names.join('|'), slot.doses.join('|'), slot.notes.join('|'));
     });
 
     console.log('[AndroidAlarm] ✅ Đặt alarm cho', Object.keys(timeMap).length, 'khung giờ');
