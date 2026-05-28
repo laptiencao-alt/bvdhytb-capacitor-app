@@ -11,7 +11,6 @@ import android.media.MediaPlayer;
 import android.media.RingtoneManager;
 import android.net.Uri;
 import android.os.Build;
-import android.os.Bundle;
 import android.os.IBinder;
 import android.os.PowerManager;
 import android.os.VibrationEffect;
@@ -19,7 +18,6 @@ import android.os.Vibrator;
 import android.os.VibratorManager;
 import android.speech.tts.TextToSpeech;
 import android.speech.tts.UtteranceProgressListener;
-import android.util.Log;
 import androidx.core.app.NotificationCompat;
 import java.util.Locale;
 import java.util.ArrayList;
@@ -27,7 +25,6 @@ import java.util.List;
 
 public class AlarmService extends Service implements TextToSpeech.OnInitListener {
 
-    static final String TAG = "AlarmService";
     static final String CHANNEL_ID = "medreminder_alarm";
     static final int NOTIF_ID = 9999;
     static AlarmService instance;
@@ -42,7 +39,6 @@ public class AlarmService extends Service implements TextToSpeech.OnInitListener
     static final int MAX_ROUNDS = 3;
     boolean alarmStopped = false;
     android.os.Handler mainHandler;
-    boolean chuongStarted = false;
 
     public static void stopAlarmFromApp() {
         if (instance != null) instance.stopAlarm();
@@ -62,27 +58,13 @@ public class AlarmService extends Service implements TextToSpeech.OnInitListener
     public void onInit(int status) {
         if (status == TextToSpeech.SUCCESS) {
             int r = tts.setLanguage(new Locale("vi", "VN"));
-            if (r == TextToSpeech.LANG_MISSING_DATA || r == TextToSpeech.LANG_NOT_SUPPORTED) {
-                Log.w(TAG, "Vietnamese TTS not available, trying US English");
+            if (r == TextToSpeech.LANG_MISSING_DATA || r == TextToSpeech.LANG_NOT_SUPPORTED)
                 tts.setLanguage(Locale.US);
-            }
             tts.setSpeechRate(0.85f);
-
-            // Quan trọng: đặt TTS dùng STREAM_ALARM để không bị mute
-            if (Build.VERSION.SDK_INT >= Build.VERSION_CODES.LOLLIPOP) {
-                tts.setAudioAttributes(new AudioAttributes.Builder()
-                    .setUsage(AudioAttributes.USAGE_ALARM)
-                    .setContentType(AudioAttributes.CONTENT_TYPE_SPEECH)
-                    .build());
-            }
-
             tts.setOnUtteranceProgressListener(new UtteranceProgressListener() {
-                @Override public void onStart(String id) {
-                    Log.d(TAG, "TTS onStart: " + id);
-                }
+                @Override public void onStart(String id) {}
                 @Override
                 public void onDone(String id) {
-                    Log.d(TAG, "TTS onDone: " + id);
                     if (alarmStopped) return;
                     ttsIndex++;
                     if (ttsIndex < ttsList.size()) {
@@ -96,25 +78,16 @@ public class AlarmService extends Service implements TextToSpeech.OnInitListener
                             mainHandler.postDelayed(() -> {
                                 if (!alarmStopped) speak(ttsList.get(0));
                             }, 2000);
-                        } else if (!alarmStopped) {
-                            // TTS xong hết → bật chuông nếu chưa bật
-                            mainHandler.post(() -> { if (!chuongStarted && !alarmStopped) startChuong(); });
                         }
                     }
                 }
-                @Override public void onError(String id) {
-                    Log.e(TAG, "TTS onError: " + id);
-                }
+                @Override public void onError(String id) {}
             });
             ttsReady = true;
-            Log.d(TAG, "TTS ready, ttsList size=" + ttsList.size());
-            // TTS vừa sẵn sàng → nếu có danh sách thuốc đang chờ, nói ngay
             if (!ttsList.isEmpty() && !alarmStopped) {
-                pauseChuongForTTS();
+                setMaxVolume();
                 speak(ttsList.get(0));
             }
-        } else {
-            Log.e(TAG, "TTS init failed with status: " + status);
         }
     }
 
@@ -132,7 +105,6 @@ public class AlarmService extends Service implements TextToSpeech.OnInitListener
 
         instance = this;
         alarmStopped = false;
-        chuongStarted = false;
 
         String medName = intent != null ? intent.getStringExtra("medName") : "Thuốc";
         String medDose = intent != null ? intent.getStringExtra("medDose") : "";
@@ -141,12 +113,10 @@ public class AlarmService extends Service implements TextToSpeech.OnInitListener
         if (medDose == null) medDose = "";
         if (medNote == null) medNote = "";
 
-        // Tạo biến final để dùng trong lambda
+        // Tạo biến final để dùng trong lambda (FIX lỗi compile)
         final String fMedName = medName;
         final String fMedDose = medDose;
         final String fMedNote = medNote;
-
-        Log.d(TAG, "Alarm started: name=" + fMedName + " dose=" + fMedDose);
 
         // WakeLock
         PowerManager pm = (PowerManager) getSystemService(Context.POWER_SERVICE);
@@ -222,22 +192,16 @@ public class AlarmService extends Service implements TextToSpeech.OnInitListener
         }
         ttsList.add("Bệnh viện Đại học Y Thái Bình.");
 
-        Log.d(TAG, "TTS list built, size=" + ttsList.size() + ", ttsReady=" + ttsReady);
+        if (ttsReady && !alarmStopped) speak(ttsList.get(0));
 
-        // Nói TTS trước, chuông sau
-        if (ttsReady && !alarmStopped) {
-            speak(ttsList.get(0));
-            // Fallback: nếu TTS không callback, bật chuông sau 15 giây
-            mainHandler.postDelayed(() -> { if (!alarmStopped && !chuongStarted) startChuong(); }, 15000);
-        } else {
-            // TTS chưa sẵn sàng → chờ onInit callback, bật chuông sau 4 giây
-            mainHandler.postDelayed(() -> { if (!alarmStopped && !chuongStarted) startChuong(); }, 4000);
-        }
+        // Chuông sau 4 giây
+        mainHandler.postDelayed(() -> { if (!alarmStopped) startChuong(); }, 4000);
 
         // Tự tắt sau 3 phút nếu không phản hồi, rồi nhắc lại sau 5 phút
         mainHandler.postDelayed(() -> {
             if (!alarmStopped) {
                 stopAlarm();
+                // Đặt alarm nhắc lại sau 5 phút
                 scheduleSnooze(fMedName, fMedDose, fMedNote, 5 * 60 * 1000);
             }
         }, 3 * 60 * 1000);
@@ -257,25 +221,8 @@ public class AlarmService extends Service implements TextToSpeech.OnInitListener
     }
 
     void speak(String text) {
-        if (tts != null && ttsReady && !alarmStopped) {
-            Log.d(TAG, "Speaking: " + text);
-            pauseChuongForTTS();
-            Bundle params = new Bundle();
-            params.putInt(TextToSpeech.Engine.KEY_PARAM_STREAM, AudioManager.STREAM_ALARM);
-            tts.speak(text, TextToSpeech.QUEUE_FLUSH, params, "alarm_" + ttsIndex);
-        } else {
-            Log.w(TAG, "Cannot speak: tts=" + (tts != null) + " ready=" + ttsReady + " stopped=" + alarmStopped);
-        }
-    }
-
-    // Tạm dừng chuông để TTS nghe rõ
-    void pauseChuongForTTS() {
-        if (mediaPlayer != null && mediaPlayer.isPlaying()) {
-            try {
-                mediaPlayer.pause();
-                Log.d(TAG, "Chuong paused for TTS");
-            } catch (Exception e) { }
-        }
+        if (tts != null && ttsReady && !alarmStopped)
+            tts.speak(text, TextToSpeech.QUEUE_FLUSH, null, "alarm_" + ttsIndex);
     }
 
     void startChuong() {
@@ -291,11 +238,7 @@ public class AlarmService extends Service implements TextToSpeech.OnInitListener
             mediaPlayer.setLooping(true);
             mediaPlayer.prepare();
             mediaPlayer.start();
-            chuongStarted = true;
-            Log.d(TAG, "Chuong started");
-        } catch (Exception e) {
-            Log.e(TAG, "startChuong error", e);
-        }
+        } catch (Exception e) { e.printStackTrace(); }
     }
 
     void startVibration() {
@@ -314,6 +257,7 @@ public class AlarmService extends Service implements TextToSpeech.OnInitListener
         }
     }
 
+    // Đặt alarm nhắc lại sau X milliseconds
     void scheduleSnooze(String name, String dose, String note, long delayMs) {
         android.app.AlarmManager am = (android.app.AlarmManager) getSystemService(Context.ALARM_SERVICE);
         if (am == null) return;
@@ -321,8 +265,9 @@ public class AlarmService extends Service implements TextToSpeech.OnInitListener
         intent.putExtra("medName", name);
         intent.putExtra("medDose", dose);
         intent.putExtra("medNote", note);
-        intent.putExtra("hour", -2);
+        intent.putExtra("hour", -2); // -2 = snooze, không lặp lại hàng ngày
         intent.putExtra("minute", -2);
+        // requestCode đặc biệt cho snooze
         PendingIntent pi = PendingIntent.getBroadcast(this, 99999, intent,
             PendingIntent.FLAG_UPDATE_CURRENT | PendingIntent.FLAG_IMMUTABLE);
         long triggerAt = System.currentTimeMillis() + delayMs;
@@ -332,9 +277,10 @@ public class AlarmService extends Service implements TextToSpeech.OnInitListener
             am.setExact(android.app.AlarmManager.RTC_WAKEUP, triggerAt, pi);
     }
 
+    // Gọi khi MainActivity được mở - tắt âm thanh ngay, giữ notification
     public static void onAppOpened() {
         if (instance == null || instance.alarmStopped) return;
-        Log.d(TAG, "onAppOpened - stopping sound");
+        // Tắt âm thanh + rung ngay lập tức
         if (instance.tts != null) instance.tts.stop();
         if (instance.mediaPlayer != null) {
             try { instance.mediaPlayer.stop(); instance.mediaPlayer.release(); } catch (Exception e) {}
@@ -342,6 +288,7 @@ public class AlarmService extends Service implements TextToSpeech.OnInitListener
         }
         if (instance.vibrator != null) { instance.vibrator.cancel(); instance.vibrator = null; }
         instance.alarmStopped = true;
+        // Tắt hoàn toàn sau 30 giây
         instance.mainHandler.postDelayed(() -> {
             if (instance != null) instance.stopAlarm();
         }, 30 * 1000);
