@@ -11,6 +11,7 @@ import android.media.MediaPlayer;
 import android.media.RingtoneManager;
 import android.net.Uri;
 import android.os.Build;
+import android.os.Bundle;
 import android.os.IBinder;
 import android.os.PowerManager;
 import android.os.VibrationEffect;
@@ -78,6 +79,13 @@ public class AlarmService extends Service implements TextToSpeech.OnInitListener
                             mainHandler.postDelayed(() -> {
                                 if (!alarmStopped) speak(ttsList.get(0));
                             }, 2000);
+                        } else {
+                            // TTS xong hết → resume chuông
+                            mainHandler.post(() -> {
+                                if (mediaPlayer != null && !alarmStopped) {
+                                    try { mediaPlayer.start(); } catch (Exception e) {}
+                                }
+                            });
                         }
                     }
                 }
@@ -221,8 +229,15 @@ public class AlarmService extends Service implements TextToSpeech.OnInitListener
     }
 
     void speak(String text) {
-        if (tts != null && ttsReady && !alarmStopped)
-            tts.speak(text, TextToSpeech.QUEUE_FLUSH, null, "alarm_" + ttsIndex);
+        if (tts != null && ttsReady && !alarmStopped) {
+            // Tạm dừng chuông khi TTS đang nói
+            if (mediaPlayer != null && mediaPlayer.isPlaying()) {
+                try { mediaPlayer.pause(); } catch (Exception e) {}
+            }
+            Bundle params = new Bundle();
+            params.putInt(TextToSpeech.Engine.KEY_PARAM_STREAM, AudioManager.STREAM_ALARM);
+            tts.speak(text, TextToSpeech.QUEUE_ADD, params, "alarm_" + ttsIndex);
+        }
     }
 
     void startChuong() {
