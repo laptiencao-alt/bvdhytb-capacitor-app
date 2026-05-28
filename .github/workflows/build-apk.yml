@@ -41,10 +41,6 @@ jobs:
     - name: Copy web assets to Android
       run: |
         mkdir -p android/app/src/main/assets/public
-        if [ -d "pw4" ]; then
-          cp -r pw4/. android/app/src/main/assets/public/
-          echo "Copied from pw4 folder"
-        fi
 
     - name: Setup Gradle
       uses: gradle/actions/setup-gradle@v3
