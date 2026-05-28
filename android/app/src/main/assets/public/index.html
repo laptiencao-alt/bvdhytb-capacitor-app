@@ -19173,22 +19173,30 @@ function syncAndroidAlarms() {
     // Đặt alarm cho từng thuốc
     if (!medications || medications.length === 0) return;
 
+    // Gộp thuốc cùng giờ bằng dấu | để AlarmService đọc hết 1 lần
+    const timeMap = {}; // key: "HH:MM" → {names: [], doses: [], notes: []}
     medications.forEach(med => {
       if (!med.times || med.times.length === 0) return;
       med.times.forEach(t => {
         const [h, m] = t.split(':').map(Number);
         if (isNaN(h) || isNaN(m)) return;
-
-        // Gộp tên + liều + ghi chú thành thông tin báo thức
-        const medName = med.name || 'Thuốc';
-        const medDose = med.dose || '';
-        const medNote = med.note || '';
-
-        window.AndroidAlarm.scheduleAlarm(h, m, medName, medDose, medNote);
+        const key = t; // "HH:MM"
+        if (!timeMap[key]) timeMap[key] = { h, m, names: [], doses: [], notes: [] };
+        timeMap[key].names.push(med.name || 'Thuốc');
+        timeMap[key].doses.push(med.dose || '');
+        timeMap[key].notes.push(med.note || '');
       });
     });
 
-    console.log('[AndroidAlarm] ✅ Đã đặt báo thức cho', medications.length, 'thuốc');
+    // Đặt 1 alarm cho mỗi khung giờ, gộp bằng dấu |
+    Object.values(timeMap).forEach(slot => {
+      const name = slot.names.join('|');
+      const dose = slot.doses.join('|');
+      const note = slot.notes.join('|');
+      window.AndroidAlarm.scheduleAlarm(slot.h, slot.m, name, dose, note);
+    });
+
+    console.log('[AndroidAlarm] ✅ Đặt alarm cho', Object.keys(timeMap).length, 'khung giờ');
   } catch (e) {
     console.warn('[AndroidAlarm] Lỗi đặt báo thức:', e);
   }
