@@ -10,73 +10,54 @@ jobs:
     runs-on: ubuntu-latest
 
     steps:
-      - name: Checkout
-        uses: actions/checkout@v4
+    - name: Checkout
+      uses: actions/checkout@v4
 
-      - name: Set up JDK 17
-        uses: actions/setup-java@v4
-        with:
-          java-version: '17'
-          distribution: 'temurin'
+    - name: Set up JDK 17
+      uses: actions/setup-java@v4
+      with:
+        java-version: '17'
+        distribution: 'temurin'
 
-      - name: Set up Android SDK
-        uses: android-actions/setup-android@v3
+    - name: Set up Android SDK
+      uses: android-actions/setup-android@v3
 
-      - name: Fix icon filenames
-        run: |
-          for density in mdpi hdpi xhdpi xxhdpi xxxhdpi; do
-            DIR="android/app/src/main/res/mipmap-${density}"
-            for f in "$DIR"/*.png; do
-              base=$(basename "$f")
-              if [ "$base" != "ic_launcher.png" ] && [ "$base" != "ic_launcher_round.png" ]; then
-                cp "$f" "$DIR/ic_launcher.png"
-                cp "$f" "$DIR/ic_launcher_round.png"
-                echo "Fixed $density: $base → ic_launcher.png"
-              fi
-            done
+    - name: Download app icon
+      run: |
+        curl -sL "https://bvdhytb-nhacthuoc.pages.dev/icon-512.png" -o /tmp/icon.png 2>/dev/null || true
+        if [ -f /tmp/icon.png ] && [ $(stat -c%s /tmp/icon.png) -gt 1000 ]; then
+          for density_size in "mdpi:48" "hdpi:72" "xhdpi:96" "xxhdpi:144" "xxxhdpi:192"; do
+            DENSITY=$(echo $density_size | cut -d: -f1)
+            SIZE=$(echo $density_size | cut -d: -f2)
+            DIR="android/app/src/main/res/mipmap-${DENSITY}"
+            mkdir -p "$DIR"
+            convert /tmp/icon.png -resize ${SIZE}x${SIZE} "$DIR/ic_launcher.png" 2>/dev/null || true
+            cp "$DIR/ic_launcher.png" "$DIR/ic_launcher_round.png" 2>/dev/null || true
           done
+          echo "Icons downloaded"
+        fi
 
-      - name: Copy web assets to Android
-        run: |
-          mkdir -p android/app/src/main/assets/public
+    - name: Copy web assets to Android
+      run: |
+        mkdir -p android/app/src/main/assets/public
+        for f in index.html app.js app.css sw.js push-manager.js manifest.webmanifest icon-192.png icon-512.png apple-touch-icon.png; do
+          [ -f "$f" ] && cp "$f" android/app/src/main/assets/public/ && echo "Copied $f"
+        done
+        [ -d ".well-known" ] && cp -r .well-known android/app/src/main/assets/public/ || true
 
-      - name: Generate Keystore (first time only)
-        run: |
-          if [ -z "${{ secrets.KEYSTORE_BASE64 }}" ]; then
-            echo "No keystore found, generating new one..."
-            keytool -genkey -v \
-              -keystore bvdhytb.keystore \
-              -alias bvdhytb \
-              -keyalg RSA \
-              -keysize 2048 \
-              -validity 10000 \
-              -dname "CN=BVDHYTB, OU=IT, O=Benh vien Dai hoc Y Thai Binh, L=Thai Binh, ST=Thai Binh, C=VN" \
-              -storepass BvDhYTB@2006 \
-              -keypass BvDhYTB@2006
-            echo "KEYSTORE GENERATED - Please save this as a secret:"
-            base64 bvdhytb.keystore
-          else
-            echo "${{ secrets.KEYSTORE_BASE64 }}" | base64 -d > bvdhytb.keystore
-            echo "Keystore loaded from secrets"
-          fi
+    - name: Setup Gradle
+      uses: gradle/actions/setup-gradle@v3
+      with:
+        gradle-version: '8.4'
 
-      - name: Setup Gradle
-        uses: gradle/actions/setup-gradle@v3
-        with:
-          gradle-version: '8.4'
+    - name: Build Debug APK
+      run: |
+        cd android
+        gradle assembleDebug
 
-      - name: Build Signed APK
-        run: |
-          cd android
-          gradle assembleRelease \
-            -Pandroid.injected.signing.store.file=$PWD/../bvdhytb.keystore \
-            -Pandroid.injected.signing.store.password=BvDhYTB@2006 \
-            -Pandroid.injected.signing.key.alias=bvdhytb \
-            -Pandroid.injected.signing.key.password=BvDhYTB@2006
-
-      - name: Upload APK
-        uses: actions/upload-artifact@v4
-        with:
-          name: BVDHYTB-release-apk
-          path: android/app/build/outputs/apk/release/app-release.apk
-          retention-days: 90
+    - name: Upload APK
+      uses: actions/upload-artifact@v4
+      with:
+        name: BVDHYTB-debug-apk
+        path: android/app/build/outputs/apk/debug/app-debug.apk
+        retention-days: 90
