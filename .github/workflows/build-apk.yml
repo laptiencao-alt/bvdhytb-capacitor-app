@@ -1,63 +1,63 @@
-name: Build APK
-
+﻿name: Build APK
 on:
   push:
     branches: [ main ]
   workflow_dispatch:
-
 jobs:
   build:
     runs-on: ubuntu-latest
-
     steps:
-    - name: Checkout
-      uses: actions/checkout@v4
-
-    - name: Set up JDK 17
-      uses: actions/setup-java@v4
-      with:
-        java-version: '17'
-        distribution: 'temurin'
-
-    - name: Set up Android SDK
-      uses: android-actions/setup-android@v3
-
-    - name: Download app icon
-      run: |
-        curl -sL "https://bvdhytb-nhacthuoc.pages.dev/icon-512.png" -o /tmp/icon.png 2>/dev/null || true
-        if [ -f /tmp/icon.png ] && [ $(stat -c%s /tmp/icon.png) -gt 1000 ]; then
-          for density_size in "mdpi:48" "hdpi:72" "xhdpi:96" "xxhdpi:144" "xxxhdpi:192"; do
-            DENSITY=$(echo $density_size | cut -d: -f1)
-            SIZE=$(echo $density_size | cut -d: -f2)
-            DIR="android/app/src/main/res/mipmap-${DENSITY}"
-            mkdir -p "$DIR"
-            convert /tmp/icon.png -resize ${SIZE}x${SIZE} "$DIR/ic_launcher.png" 2>/dev/null || true
-            cp "$DIR/ic_launcher.png" "$DIR/ic_launcher_round.png" 2>/dev/null || true
+      - name: Checkout
+        uses: actions/checkout@v4
+      - name: Set up JDK 17
+        uses: actions/setup-java@v4
+        with:
+          java-version: '17'
+          distribution: 'temurin'
+      - name: Set up Android SDK
+        uses: android-actions/setup-android@v3
+      - name: Fix icon filenames
+        run: |
+          for density in mdpi hdpi xhdpi xxhdpi xxxhdpi; do
+            DIR="android/app/src/main/res/mipmap-${density}"
+            for f in "$DIR"/*.png; do
+              base=$(basename "$f")
+              if [ "$base" != "ic_launcher.png" ] && [ "$base" != "ic_launcher_round.png" ]; then
+                cp "$f" "$DIR/ic_launcher.png"
+                cp "$f" "$DIR/ic_launcher_round.png"
+              fi
+            done
           done
-          echo "Icons downloaded"
-        fi
-
-    - name: Copy web assets to Android
-      run: |
-        mkdir -p android/app/src/main/assets/public
-        for f in index.html app.js app.css sw.js push-manager.js manifest.webmanifest icon-192.png icon-512.png apple-touch-icon.png; do
-          [ -f "$f" ] && cp "$f" android/app/src/main/assets/public/ && echo "Copied $f"
-        done
-        [ -d ".well-known" ] && cp -r .well-known android/app/src/main/assets/public/ || true
-
-    - name: Setup Gradle
-      uses: gradle/actions/setup-gradle@v3
-      with:
-        gradle-version: '8.4'
-
-    - name: Build Debug APK
-      run: |
-        cd android
-        gradle assembleDebug
-
-    - name: Upload APK
-      uses: actions/upload-artifact@v4
-      with:
-        name: BVDHYTB-debug-apk
-        path: android/app/build/outputs/apk/debug/app-debug.apk
-        retention-days: 90
+      - name: Copy web assets to Android
+        run: mkdir -p android/app/src/main/assets/public
+      - name: Generate Keystore (first time only)
+        run: |
+          if [ -z "${{ secrets.KEYSTORE_BASE64 }}" ]; then
+            keytool -genkey -v \
+              -keystore bvdhytb.keystore \
+              -alias bvdhytb \
+              -keyalg RSA -keysize 2048 -validity 10000 \
+              -dname "CN=BVDHYTB, OU=IT, O=Benh vien Dai hoc Y Thai Binh, L=Thai Binh, ST=Thai Binh, C=VN" \
+              -storepass ${{ secrets.KEYSTORE_PASSWORD }} \
+              -keypass ${{ secrets.KEYSTORE_PASSWORD }}
+          else
+            echo "${{ secrets.KEYSTORE_BASE64 }}" | base64 -d > bvdhytb.keystore
+          fi
+      - name: Setup Gradle
+        uses: gradle/actions/setup-gradle@v3
+        with:
+          gradle-version: '8.4'
+      - name: Build Signed APK
+        run: |
+          cd android
+          gradle assembleRelease \
+            -Pandroid.injected.signing.store.file=$PWD/../bvdhytb.keystore \
+            -Pandroid.injected.signing.store.password=${{ secrets.KEYSTORE_PASSWORD }} \
+            -Pandroid.injected.signing.key.alias=bvdhytb \
+            -Pandroid.injected.signing.key.password=${{ secrets.KEYSTORE_PASSWORD }}
+      - name: Upload APK
+        uses: actions/upload-artifact@v4
+        with:
+          name: BVDHYTB-release-apk
+          path: android/app/build/outputs/apk/release/app-release.apk
+          retention-days: 90
