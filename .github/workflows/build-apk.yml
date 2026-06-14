@@ -53,7 +53,7 @@ jobs:
           gradle assembleRelease \
             -Pandroid.injected.signing.store.file=$PWD/../bvdhytb.keystore \
             -Pandroid.injected.signing.store.password=${{ secrets.KEYSTORE_PASSWORD }} \
-            -Pandroid.injected.signing.key.alias=bvdhytb \
+            -Pandroid.injected.signing.key.alias=android \
             -Pandroid.injected.signing.key.password=${{ secrets.KEYSTORE_PASSWORD }}
       - name: Upload APK
         uses: actions/upload-artifact@v4
