@@ -99,7 +99,7 @@ public class MainActivity extends AppCompatActivity {
 
         // Load từ Cloudflare Pages (tự cập nhật giao diện không cần rebuild APK)
         // Service worker sẽ cache toàn bộ → vẫn chạy được khi offline sau lần đầu
-        webView.loadUrl("https://bvdhytb-nhacthuoc.pages.dev/");
+        webView.loadUrl("https://bvdhytb-pwa.bvdhytb-nhacthuoc.workers.dev/");
     }
 
     @Override
