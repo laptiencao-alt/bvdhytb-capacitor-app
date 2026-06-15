@@ -68,6 +68,7 @@ public class MainActivity extends AppCompatActivity {
         s.setAllowFileAccess(true);
 
         webView.addJavascriptInterface(new AlarmBridge(this), "AndroidAlarm");
+        webView.addJavascriptInterface(new SpeechBridge(this, webView), "AndroidSpeech");
 
         webView.setWebViewClient(new WebViewClient() {
             @Override
