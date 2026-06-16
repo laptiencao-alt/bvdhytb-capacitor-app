@@ -1,126 +1,189 @@
-// fix-ai-tts-bridge.js — Chạy từ C:\pw4: node fix-ai-tts-bridge.js
-// Update speakAIReply() để ưu tiên AndroidSpeech.speak() native bridge (cho APK Huawei)
-// Fallback Web Speech API cho PWA web
+package com.bvdhytb.nhacthuoc;
 
-const fs = require('fs');
+import android.app.Activity;
+import android.content.Intent;
+import android.os.Bundle;
+import android.speech.RecognitionListener;
+import android.speech.RecognizerIntent;
+import android.speech.SpeechRecognizer;
+import android.speech.tts.TextToSpeech;
+import android.speech.tts.UtteranceProgressListener;
+import android.webkit.JavascriptInterface;
+import android.webkit.WebView;
+import android.util.Log;
 
-const file = 'pwa/index.html';
-let html = fs.readFileSync(file, 'utf8');
-const original = html;
+import java.util.ArrayList;
+import java.util.Locale;
 
-// ──────────────────────────────────────────────────────────
-// Tìm và thay thế function speakAIReply hiện tại
-// ──────────────────────────────────────────────────────────
-const fnStartMarker = 'function speakAIReply(text) {';
-const startIdx = html.indexOf(fnStartMarker);
+public class SpeechBridge {
 
-if (startIdx === -1) {
-  console.log('❌ Không tìm thấy function speakAIReply');
-  console.log('   Bạn cần chạy fix-ai-tts-final.js trước để tạo function này');
-  process.exit(1);
-}
+    private static final String TAG = "SpeechBridge";
+    private final Activity activity;
+    private final WebView webView;
+    private SpeechRecognizer speechRecognizer;
+    private TextToSpeech tts;
+    private boolean ttsReady = false;
 
-// Tìm closing bracket bằng depth counter
-const bodyStart = html.indexOf('{', startIdx);
-let depth = 0, endIdx = bodyStart;
-for (let i = bodyStart; i < html.length; i++) {
-  if (html[i] === '{') depth++;
-  else if (html[i] === '}') {
-    depth--;
-    if (depth === 0) { endIdx = i; break; }
-  }
-}
-
-const oldFn = html.slice(startIdx, endIdx + 1);
-console.log('Tìm thấy speakAIReply, length:', oldFn.length, 'chars');
-
-// ──────────────────────────────────────────────────────────
-// Function mới — ưu tiên native bridge
-// ──────────────────────────────────────────────────────────
-const NEW_FN = `function speakAIReply(text) {
-  if (!text) return;
-
-  // ─── ƯU TIÊN: Native Android TTS qua SpeechBridge (cho APK) ───
-  if (window.AndroidSpeech && typeof window.AndroidSpeech.speak === 'function') {
-    try {
-      console.log('[AI-TTS] using native AndroidSpeech.speak()');
-      window.AndroidSpeech.speak(text);
-      return;
-    } catch(e) {
-      console.warn('[AI-TTS] AndroidSpeech.speak failed:', e);
-      // Fall through to Web Speech API
-    }
-  }
-
-  // ─── FALLBACK: Web Speech API (cho PWA web) ───
-  if (!('speechSynthesis' in window)) {
-    console.warn('[AI-TTS] no speechSynthesis available');
-    return;
-  }
-  try {
-    window.speechSynthesis.cancel();
-
-    // Prime audio context bằng tone ngắn (Android WebView cần)
-    if (typeof audioCtx !== 'undefined' && audioCtx) {
-      try {
-        const now = audioCtx.currentTime;
-        const osc = audioCtx.createOscillator();
-        const gain = audioCtx.createGain();
-        osc.type = 'sine';
-        osc.frequency.value = 800;
-        gain.gain.setValueAtTime(0.05, now);
-        gain.gain.linearRampToValueAtTime(0, now + 0.1);
-        osc.connect(gain);
-        gain.connect(audioCtx.destination);
-        osc.start(now);
-        osc.stop(now + 0.12);
-      } catch(e) {}
+    public SpeechBridge(Activity activity, WebView webView) {
+        this.activity = activity;
+        this.webView = webView;
+        initTTS();
     }
 
-    setTimeout(() => {
-      try {
-        const u = new SpeechSynthesisUtterance(text);
-        if (typeof _vnVoiceCache !== 'undefined' && _vnVoiceCache) {
-          u.voice = _vnVoiceCache;
+    private void initTTS() {
+        tts = new TextToSpeech(activity, new TextToSpeech.OnInitListener() {
+            @Override
+            public void onInit(int status) {
+                if (status == TextToSpeech.SUCCESS) {
+                    Locale vnLocale = new Locale("vi", "VN");
+                    int result = tts.setLanguage(vnLocale);
+                    if (result == TextToSpeech.LANG_MISSING_DATA || result == TextToSpeech.LANG_NOT_SUPPORTED) {
+                        Log.w(TAG, "Vietnamese TTS not available, trying vi only");
+                        tts.setLanguage(new Locale("vi"));
+                    }
+                    tts.setSpeechRate(0.85f);
+                    tts.setPitch(1.1f);
+                    ttsReady = true;
+
+                    tts.setOnUtteranceProgressListener(new UtteranceProgressListener() {
+                        @Override
+                        public void onStart(String utteranceId) {
+                            callJS("if(typeof _onNativeTTSStart==='function') _onNativeTTSStart();");
+                        }
+
+                        @Override
+                        public void onDone(String utteranceId) {
+                            callJS("if(typeof _onNativeTTSDone==='function') _onNativeTTSDone();");
+                        }
+
+                        @Override
+                        public void onError(String utteranceId) {
+                            callJS("if(typeof _onNativeTTSError==='function') _onNativeTTSError();");
+                        }
+                    });
+
+                    Log.i(TAG, "TTS initialized successfully");
+                } else {
+                    Log.e(TAG, "TTS initialization failed with status: " + status);
+                    ttsReady = false;
+                }
+            }
+        });
+    }
+
+    @JavascriptInterface
+    public void speak(String text) {
+        if (tts != null && ttsReady) {
+            tts.stop();
+            Bundle params = new Bundle();
+            tts.speak(text, TextToSpeech.QUEUE_FLUSH, params, "medreminder_tts");
         } else {
-          const voices = window.speechSynthesis.getVoices();
-          const vn = voices.find(v => v.lang && v.lang.startsWith('vi'));
-          if (vn) {
-            u.voice = vn;
-            if (typeof _vnVoiceCache !== 'undefined') _vnVoiceCache = vn;
-          }
+            Log.w(TAG, "TTS not ready, cannot speak");
+            callJS("if(typeof _onNativeTTSError==='function') _onNativeTTSError();");
         }
-        u.lang = 'vi-VN';
-        u.rate = 0.85;
-        u.pitch = 1.1;
-        u.volume = 1.0;
-        u.onstart = () => console.log('[AI-TTS-Web] onstart');
-        u.onend = () => console.log('[AI-TTS-Web] onend');
-        u.onerror = (e) => console.warn('[AI-TTS-Web] onerror:', e.error);
-        window.speechSynthesis.speak(u);
-        console.log('[AI-TTS-Web] speak() called, length:', text.length);
-      } catch(e) {
-        console.error('[AI-TTS-Web] inner error:', e);
-      }
-    }, 250);
-  } catch(e) {
-    console.error('[AI-TTS-Web] outer error:', e);
-  }
-}`;
+    }
 
-html = html.slice(0, startIdx) + NEW_FN + html.slice(endIdx + 1);
+    @JavascriptInterface
+    public void stopSpeaking() {
+        if (tts != null) {
+            tts.stop();
+        }
+    }
 
-if (html === original) {
-  console.log('⚠️  File không thay đổi');
-  process.exit(1);
+    @JavascriptInterface
+    public boolean isTTSAvailable() {
+        return ttsReady;
+    }
+
+    @JavascriptInterface
+    public void startListening() {
+        activity.runOnUiThread(new Runnable() {
+            @Override
+            public void run() {
+                if (speechRecognizer != null) {
+                    speechRecognizer.destroy();
+                }
+                speechRecognizer = SpeechRecognizer.createSpeechRecognizer(activity);
+                speechRecognizer.setRecognitionListener(new RecognitionListener() {
+                    @Override
+                    public void onReadyForSpeech(Bundle params) {
+                        callJS("if(typeof _onSpeechReady==='function') _onSpeechReady();");
+                    }
+
+                    @Override
+                    public void onBeginningOfSpeech() {}
+
+                    @Override
+                    public void onRmsChanged(float rmsdB) {}
+
+                    @Override
+                    public void onBufferReceived(byte[] buffer) {}
+
+                    @Override
+                    public void onEndOfSpeech() {}
+
+                    @Override
+                    public void onError(int error) {
+                        callJS("if(typeof _onSpeechError==='function') _onSpeechError(" + error + ");");
+                    }
+
+                    @Override
+                    public void onResults(Bundle results) {
+                        ArrayList<String> matches = results.getStringArrayList(SpeechRecognizer.RESULTS_RECOGNITION);
+                        if (matches != null && !matches.isEmpty()) {
+                            String text = matches.get(0).replace("'", "\\'").replace("\\", "\\\\");
+                            callJS("if(typeof _onSpeechResult==='function') _onSpeechResult('" + text + "');");
+                        }
+                    }
+
+                    @Override
+                    public void onPartialResults(Bundle partialResults) {}
+
+                    @Override
+                    public void onEvent(int eventType, Bundle params) {}
+                });
+
+                Intent intent = new Intent(RecognizerIntent.ACTION_RECOGNIZE_SPEECH);
+                intent.putExtra(RecognizerIntent.EXTRA_LANGUAGE_MODEL, RecognizerIntent.LANGUAGE_MODEL_FREE_FORM);
+                intent.putExtra(RecognizerIntent.EXTRA_LANGUAGE, "vi-VN");
+                intent.putExtra(RecognizerIntent.EXTRA_MAX_RESULTS, 1);
+                speechRecognizer.startListening(intent);
+            }
+        });
+    }
+
+    @JavascriptInterface
+    public void stopListening() {
+        activity.runOnUiThread(new Runnable() {
+            @Override
+            public void run() {
+                if (speechRecognizer != null) {
+                    speechRecognizer.stopListening();
+                    speechRecognizer.destroy();
+                    speechRecognizer = null;
+                }
+            }
+        });
+    }
+
+    private void callJS(final String js) {
+        activity.runOnUiThread(new Runnable() {
+            @Override
+            public void run() {
+                webView.loadUrl("javascript:" + js);
+            }
+        });
+    }
+
+    public void destroy() {
+        if (speechRecognizer != null) {
+            speechRecognizer.destroy();
+            speechRecognizer = null;
+        }
+        if (tts != null) {
+            tts.stop();
+            tts.shutdown();
+            tts = null;
+        }
+    }
 }
-
-fs.writeFileSync(file + '.bak-pre-bridge', original, 'utf8');
-fs.writeFileSync(file, html, 'utf8');
-
-console.log('\n✅ Đã update speakAIReply()');
-console.log('   - Ưu tiên: window.AndroidSpeech.speak() (native)');
-console.log('   - Fallback: Web Speech API (PWA web)');
-console.log('💾 Backup: pwa/index.html.bak-pre-bridge');
-console.log('\n👉 Deploy PWA:');
-console.log('   npx wrangler deploy --config wrangler-pwa.jsonc');
