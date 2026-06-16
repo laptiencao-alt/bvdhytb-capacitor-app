@@ -23,19 +23,15 @@ public class SpeechBridge {
     private SpeechRecognizer speechRecognizer;
     private TextToSpeech tts;
     private boolean ttsReady = false;
+    private boolean ttsInitStarted = false;
 
     public SpeechBridge(Activity activity, WebView webView) {
         this.activity = activity;
         this.webView = webView;
-        try {
-            initTTS();
-        } catch (Exception e) {
-            Log.e(TAG, "TTS init failed, STT still works", e);
-            ttsReady = false;
-        }
+        // NO TTS init here — lazy init on first speak() call
     }
 
-    // ==================== STT (giữ nguyên signature gốc) ====================
+    // ==================== STT (y hệt APK gốc) ====================
 
     @JavascriptInterface
     public boolean isAvailable() {
@@ -126,60 +122,86 @@ public class SpeechBridge {
         callJS("if(typeof _onSpeechError==='function') _onSpeechError(" + error + ");");
     }
 
-    // ==================== TTS (mới thêm) ====================
+    // ==================== TTS (lazy init) ====================
 
-    private void initTTS() {
-        tts = new TextToSpeech(activity, new TextToSpeech.OnInitListener() {
-            @Override
-            public void onInit(int status) {
-                if (status == TextToSpeech.SUCCESS) {
-                    try {
-                        Locale vnLocale = new Locale("vi", "VN");
-                        int result = tts.setLanguage(vnLocale);
-                        if (result == TextToSpeech.LANG_MISSING_DATA || result == TextToSpeech.LANG_NOT_SUPPORTED) {
-                            Log.w(TAG, "vi_VN not available, trying vi");
-                            tts.setLanguage(new Locale("vi"));
+    private void ensureTTS() {
+        if (ttsInitStarted) return;
+        ttsInitStarted = true;
+        try {
+            tts = new TextToSpeech(activity, new TextToSpeech.OnInitListener() {
+                @Override
+                public void onInit(int status) {
+                    if (status == TextToSpeech.SUCCESS) {
+                        try {
+                            Locale vnLocale = new Locale("vi", "VN");
+                            int result = tts.setLanguage(vnLocale);
+                            if (result == TextToSpeech.LANG_MISSING_DATA || result == TextToSpeech.LANG_NOT_SUPPORTED) {
+                                tts.setLanguage(new Locale("vi"));
+                            }
+                            tts.setSpeechRate(0.85f);
+                            tts.setPitch(1.1f);
+                            ttsReady = true;
+
+                            tts.setOnUtteranceProgressListener(new UtteranceProgressListener() {
+                                @Override
+                                public void onStart(String utteranceId) {
+                                    callJS("if(typeof _onNativeTTSStart==='function') _onNativeTTSStart();");
+                                }
+                                @Override
+                                public void onDone(String utteranceId) {
+                                    callJS("if(typeof _onNativeTTSDone==='function') _onNativeTTSDone();");
+                                }
+                                @Override
+                                public void onError(String utteranceId) {
+                                    callJS("if(typeof _onNativeTTSError==='function') _onNativeTTSError();");
+                                }
+                            });
+                            Log.i(TAG, "TTS initialized OK");
+                        } catch (Exception e) {
+                            Log.e(TAG, "TTS setup error", e);
+                            ttsReady = false;
                         }
-                        tts.setSpeechRate(0.85f);
-                        tts.setPitch(1.1f);
-                        ttsReady = true;
-
-                        tts.setOnUtteranceProgressListener(new UtteranceProgressListener() {
-                            @Override
-                            public void onStart(String utteranceId) {
-                                callJS("if(typeof _onNativeTTSStart==='function') _onNativeTTSStart();");
-                            }
-                            @Override
-                            public void onDone(String utteranceId) {
-                                callJS("if(typeof _onNativeTTSDone==='function') _onNativeTTSDone();");
-                            }
-                            @Override
-                            public void onError(String utteranceId) {
-                                callJS("if(typeof _onNativeTTSError==='function') _onNativeTTSError();");
-                            }
-                        });
-                        Log.i(TAG, "TTS initialized OK");
-                    } catch (Exception e) {
-                        Log.e(TAG, "TTS setup error", e);
+                    } else {
+                        Log.e(TAG, "TTS init failed: " + status);
                         ttsReady = false;
                     }
-                } else {
-                    Log.e(TAG, "TTS init failed: " + status);
-                    ttsReady = false;
                 }
-            }
-        });
+            });
+        } catch (Exception e) {
+            Log.e(TAG, "TTS creation failed", e);
+            ttsReady = false;
+        }
     }
 
     @JavascriptInterface
     public void speak(String text) {
+        ensureTTS();
+        // TTS init is async — if not ready yet, retry after 500ms
         if (tts != null && ttsReady) {
             tts.stop();
             Bundle params = new Bundle();
             tts.speak(text, TextToSpeech.QUEUE_FLUSH, params, "medreminder_tts");
         } else {
-            Log.w(TAG, "TTS not ready");
-            callJS("if(typeof _onNativeTTSError==='function') _onNativeTTSError();");
+            // Wait for TTS init then speak
+            final String speechText = text;
+            activity.runOnUiThread(new Runnable() {
+                @Override
+                public void run() {
+                    webView.postDelayed(new Runnable() {
+                        @Override
+                        public void run() {
+                            if (tts != null && ttsReady) {
+                                tts.stop();
+                                Bundle p = new Bundle();
+                                tts.speak(speechText, TextToSpeech.QUEUE_FLUSH, p, "medreminder_tts");
+                            } else {
+                                Log.w(TAG, "TTS still not ready after delay");
+                                callJS("if(typeof _onNativeTTSError==='function') _onNativeTTSError();");
+                            }
+                        }
+                    }, 800);
+                }
+            });
         }
     }
 
@@ -192,6 +214,7 @@ public class SpeechBridge {
 
     @JavascriptInterface
     public boolean isTTSAvailable() {
+        ensureTTS();
         return ttsReady;
     }
 
