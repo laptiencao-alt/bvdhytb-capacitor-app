@@ -27,7 +27,12 @@ public class SpeechBridge {
     public SpeechBridge(Activity activity, WebView webView) {
         this.activity = activity;
         this.webView = webView;
-        initTTS();
+        try {
+            initTTS();
+        } catch (Exception e) {
+            Log.e(TAG, "TTS init failed, STT still works", e);
+            ttsReady = false;
+        }
     }
 
     private void initTTS() {
@@ -35,36 +40,41 @@ public class SpeechBridge {
             @Override
             public void onInit(int status) {
                 if (status == TextToSpeech.SUCCESS) {
-                    Locale vnLocale = new Locale("vi", "VN");
-                    int result = tts.setLanguage(vnLocale);
-                    if (result == TextToSpeech.LANG_MISSING_DATA || result == TextToSpeech.LANG_NOT_SUPPORTED) {
-                        Log.w(TAG, "Vietnamese TTS not available, trying vi only");
-                        tts.setLanguage(new Locale("vi"));
+                    try {
+                        Locale vnLocale = new Locale("vi", "VN");
+                        int result = tts.setLanguage(vnLocale);
+                        if (result == TextToSpeech.LANG_MISSING_DATA || result == TextToSpeech.LANG_NOT_SUPPORTED) {
+                            Log.w(TAG, "vi_VN not available, trying vi");
+                            tts.setLanguage(new Locale("vi"));
+                        }
+                        tts.setSpeechRate(0.85f);
+                        tts.setPitch(1.1f);
+                        ttsReady = true;
+
+                        tts.setOnUtteranceProgressListener(new UtteranceProgressListener() {
+                            @Override
+                            public void onStart(String utteranceId) {
+                                callJS("if(typeof _onNativeTTSStart==='function') _onNativeTTSStart();");
+                            }
+
+                            @Override
+                            public void onDone(String utteranceId) {
+                                callJS("if(typeof _onNativeTTSDone==='function') _onNativeTTSDone();");
+                            }
+
+                            @Override
+                            public void onError(String utteranceId) {
+                                callJS("if(typeof _onNativeTTSError==='function') _onNativeTTSError();");
+                            }
+                        });
+
+                        Log.i(TAG, "TTS initialized OK");
+                    } catch (Exception e) {
+                        Log.e(TAG, "TTS setup error", e);
+                        ttsReady = false;
                     }
-                    tts.setSpeechRate(0.85f);
-                    tts.setPitch(1.1f);
-                    ttsReady = true;
-
-                    tts.setOnUtteranceProgressListener(new UtteranceProgressListener() {
-                        @Override
-                        public void onStart(String utteranceId) {
-                            callJS("if(typeof _onNativeTTSStart==='function') _onNativeTTSStart();");
-                        }
-
-                        @Override
-                        public void onDone(String utteranceId) {
-                            callJS("if(typeof _onNativeTTSDone==='function') _onNativeTTSDone();");
-                        }
-
-                        @Override
-                        public void onError(String utteranceId) {
-                            callJS("if(typeof _onNativeTTSError==='function') _onNativeTTSError();");
-                        }
-                    });
-
-                    Log.i(TAG, "TTS initialized successfully");
                 } else {
-                    Log.e(TAG, "TTS initialization failed with status: " + status);
+                    Log.e(TAG, "TTS init failed: " + status);
                     ttsReady = false;
                 }
             }
@@ -78,7 +88,7 @@ public class SpeechBridge {
             Bundle params = new Bundle();
             tts.speak(text, TextToSpeech.QUEUE_FLUSH, params, "medreminder_tts");
         } else {
-            Log.w(TAG, "TTS not ready, cannot speak");
+            Log.w(TAG, "TTS not ready");
             callJS("if(typeof _onNativeTTSError==='function') _onNativeTTSError();");
         }
     }
@@ -100,54 +110,59 @@ public class SpeechBridge {
         activity.runOnUiThread(new Runnable() {
             @Override
             public void run() {
-                if (speechRecognizer != null) {
-                    speechRecognizer.destroy();
-                }
-                speechRecognizer = SpeechRecognizer.createSpeechRecognizer(activity);
-                speechRecognizer.setRecognitionListener(new RecognitionListener() {
-                    @Override
-                    public void onReadyForSpeech(Bundle params) {
-                        callJS("if(typeof _onSpeechReady==='function') _onSpeechReady();");
+                try {
+                    if (speechRecognizer != null) {
+                        speechRecognizer.destroy();
                     }
-
-                    @Override
-                    public void onBeginningOfSpeech() {}
-
-                    @Override
-                    public void onRmsChanged(float rmsdB) {}
-
-                    @Override
-                    public void onBufferReceived(byte[] buffer) {}
-
-                    @Override
-                    public void onEndOfSpeech() {}
-
-                    @Override
-                    public void onError(int error) {
-                        callJS("if(typeof _onSpeechError==='function') _onSpeechError(" + error + ");");
-                    }
-
-                    @Override
-                    public void onResults(Bundle results) {
-                        ArrayList<String> matches = results.getStringArrayList(SpeechRecognizer.RESULTS_RECOGNITION);
-                        if (matches != null && !matches.isEmpty()) {
-                            String text = matches.get(0).replace("'", "\\'").replace("\\", "\\\\");
-                            callJS("if(typeof _onSpeechResult==='function') _onSpeechResult('" + text + "');");
+                    speechRecognizer = SpeechRecognizer.createSpeechRecognizer(activity);
+                    speechRecognizer.setRecognitionListener(new RecognitionListener() {
+                        @Override
+                        public void onReadyForSpeech(Bundle params) {
+                            callJS("if(typeof _onSpeechReady==='function') _onSpeechReady();");
                         }
-                    }
 
-                    @Override
-                    public void onPartialResults(Bundle partialResults) {}
+                        @Override
+                        public void onBeginningOfSpeech() {}
 
-                    @Override
-                    public void onEvent(int eventType, Bundle params) {}
-                });
+                        @Override
+                        public void onRmsChanged(float rmsdB) {}
 
-                Intent intent = new Intent(RecognizerIntent.ACTION_RECOGNIZE_SPEECH);
-                intent.putExtra(RecognizerIntent.EXTRA_LANGUAGE_MODEL, RecognizerIntent.LANGUAGE_MODEL_FREE_FORM);
-                intent.putExtra(RecognizerIntent.EXTRA_LANGUAGE, "vi-VN");
-                intent.putExtra(RecognizerIntent.EXTRA_MAX_RESULTS, 1);
-                speechRecognizer.startListening(intent);
+                        @Override
+                        public void onBufferReceived(byte[] buffer) {}
+
+                        @Override
+                        public void onEndOfSpeech() {}
+
+                        @Override
+                        public void onError(int error) {
+                            callJS("if(typeof _onSpeechError==='function') _onSpeechError(" + error + ");");
+                        }
+
+                        @Override
+                        public void onResults(Bundle results) {
+                            ArrayList<String> matches = results.getStringArrayList(SpeechRecognizer.RESULTS_RECOGNITION);
+                            if (matches != null && !matches.isEmpty()) {
+                                String text = matches.get(0).replace("\\", "\\\\").replace("'", "\\'");
+                                callJS("if(typeof _onSpeechResult==='function') _onSpeechResult('" + text + "');");
+                            }
+                        }
+
+                        @Override
+                        public void onPartialResults(Bundle partialResults) {}
+
+                        @Override
+                        public void onEvent(int eventType, Bundle params) {}
+                    });
+
+                    Intent intent = new Intent(RecognizerIntent.ACTION_RECOGNIZE_SPEECH);
+                    intent.putExtra(RecognizerIntent.EXTRA_LANGUAGE_MODEL, RecognizerIntent.LANGUAGE_MODEL_FREE_FORM);
+                    intent.putExtra(RecognizerIntent.EXTRA_LANGUAGE, "vi-VN");
+                    intent.putExtra(RecognizerIntent.EXTRA_MAX_RESULTS, 1);
+                    speechRecognizer.startListening(intent);
+                } catch (Exception e) {
+                    Log.e(TAG, "startListening error", e);
+                    callJS("if(typeof _onSpeechError==='function') _onSpeechError(99);");
+                }
             }
         });
     }
