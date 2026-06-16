@@ -17,21 +17,16 @@ import java.util.Locale;
 
 public class SpeechBridge {
 
-    private static final String TAG = "SpeechBridge";
     private final Activity activity;
     private final WebView webView;
-    private SpeechRecognizer speechRecognizer;
+    private SpeechRecognizer recognizer;
     private TextToSpeech tts;
     private boolean ttsReady = false;
-    private boolean ttsInitStarted = false;
 
     public SpeechBridge(Activity activity, WebView webView) {
         this.activity = activity;
         this.webView = webView;
-        // NO TTS init here — lazy init on first speak() call
     }
-
-    // ==================== STT (y hệt APK gốc) ====================
 
     @JavascriptInterface
     public boolean isAvailable() {
@@ -40,73 +35,44 @@ public class SpeechBridge {
 
     @JavascriptInterface
     public void startListening(String language) {
-        activity.runOnUiThread(new Runnable() {
-            @Override
-            public void run() {
-                try {
-                    if (speechRecognizer != null) {
-                        speechRecognizer.destroy();
-                    }
-                    speechRecognizer = SpeechRecognizer.createSpeechRecognizer(activity);
-                    speechRecognizer.setRecognitionListener(new RecognitionListener() {
-                        @Override
-                        public void onReadyForSpeech(Bundle params) {
-                            callJS("if(typeof _onSpeechReady==='function') _onSpeechReady();");
-                        }
-                        @Override
-                        public void onBeginningOfSpeech() {}
-                        @Override
-                        public void onRmsChanged(float rmsdB) {}
-                        @Override
-                        public void onBufferReceived(byte[] buffer) {}
-                        @Override
-                        public void onEndOfSpeech() {}
-                        @Override
-                        public void onError(int error) {
-                            sendError(String.valueOf(error));
-                        }
-                        @Override
-                        public void onResults(Bundle results) {
-                            sendResults(results, false);
-                        }
-                        @Override
-                        public void onPartialResults(Bundle partialResults) {
-                            sendResults(partialResults, true);
-                        }
-                        @Override
-                        public void onEvent(int eventType, Bundle params) {}
-                    });
-
-                    String lang = (language != null && !language.isEmpty()) ? language : "vi-VN";
-                    Intent intent = new Intent(RecognizerIntent.ACTION_RECOGNIZE_SPEECH);
-                    intent.putExtra(RecognizerIntent.EXTRA_LANGUAGE_MODEL, RecognizerIntent.LANGUAGE_MODEL_FREE_FORM);
-                    intent.putExtra(RecognizerIntent.EXTRA_LANGUAGE, lang);
-                    intent.putExtra(RecognizerIntent.EXTRA_MAX_RESULTS, 1);
-                    intent.putExtra(RecognizerIntent.EXTRA_PARTIAL_RESULTS, true);
-                    speechRecognizer.startListening(intent);
-                } catch (Exception e) {
-                    Log.e(TAG, "startListening error", e);
-                    sendError("99");
-                }
+        activity.runOnUiThread(() -> {
+            if (recognizer != null) {
+                recognizer.destroy();
             }
+            recognizer = SpeechRecognizer.createSpeechRecognizer(activity);
+            recognizer.setRecognitionListener(new RecognitionListener() {
+                @Override public void onReadyForSpeech(Bundle params) { callJS("if(typeof _onSpeechReady==='function') _onSpeechReady();"); }
+                @Override public void onBeginningOfSpeech() {}
+                @Override public void onRmsChanged(float rmsdB) {}
+                @Override public void onBufferReceived(byte[] buffer) {}
+                @Override public void onEndOfSpeech() {}
+                @Override public void onError(int error) { sendError(String.valueOf(error)); }
+                @Override public void onResults(Bundle results) { sendResults(results, false); }
+                @Override public void onPartialResults(Bundle partial) { sendResults(partial, true); }
+                @Override public void onEvent(int eventType, Bundle params) {}
+            });
+            String lang = (language != null && !language.isEmpty()) ? language : "vi-VN";
+            Intent intent = new Intent(RecognizerIntent.ACTION_RECOGNIZE_SPEECH);
+            intent.putExtra(RecognizerIntent.EXTRA_LANGUAGE_MODEL, RecognizerIntent.LANGUAGE_MODEL_FREE_FORM);
+            intent.putExtra(RecognizerIntent.EXTRA_LANGUAGE, lang);
+            intent.putExtra(RecognizerIntent.EXTRA_MAX_RESULTS, 1);
+            intent.putExtra(RecognizerIntent.EXTRA_PARTIAL_RESULTS, true);
+            recognizer.startListening(intent);
         });
     }
 
     @JavascriptInterface
     public void stopListening() {
-        activity.runOnUiThread(new Runnable() {
-            @Override
-            public void run() {
-                if (speechRecognizer != null) {
-                    speechRecognizer.stopListening();
-                    speechRecognizer.destroy();
-                    speechRecognizer = null;
-                }
+        activity.runOnUiThread(() -> {
+            if (recognizer != null) {
+                recognizer.stopListening();
+                recognizer.destroy();
+                recognizer = null;
             }
         });
     }
 
-    private void sendResults(Bundle results, boolean partial) {
+    void sendResults(Bundle results, boolean partial) {
         ArrayList<String> matches = results.getStringArrayList(SpeechRecognizer.RESULTS_RECOGNITION);
         if (matches != null && !matches.isEmpty()) {
             String text = matches.get(0).replace("\\", "\\\\").replace("'", "\\'");
@@ -118,126 +84,47 @@ public class SpeechBridge {
         }
     }
 
-    private void sendError(String error) {
+    void sendError(String error) {
         callJS("if(typeof _onSpeechError==='function') _onSpeechError(" + error + ");");
     }
 
-    // ==================== TTS (lazy init) ====================
-
-    private void ensureTTS() {
-        if (ttsInitStarted) return;
-        ttsInitStarted = true;
-        try {
-            tts = new TextToSpeech(activity, new TextToSpeech.OnInitListener() {
-                @Override
-                public void onInit(int status) {
-                    if (status == TextToSpeech.SUCCESS) {
-                        try {
-                            Locale vnLocale = new Locale("vi", "VN");
-                            int result = tts.setLanguage(vnLocale);
-                            if (result == TextToSpeech.LANG_MISSING_DATA || result == TextToSpeech.LANG_NOT_SUPPORTED) {
-                                tts.setLanguage(new Locale("vi"));
-                            }
-                            tts.setSpeechRate(0.85f);
-                            tts.setPitch(1.1f);
-                            ttsReady = true;
-
-                            tts.setOnUtteranceProgressListener(new UtteranceProgressListener() {
-                                @Override
-                                public void onStart(String utteranceId) {
-                                    callJS("if(typeof _onNativeTTSStart==='function') _onNativeTTSStart();");
-                                }
-                                @Override
-                                public void onDone(String utteranceId) {
-                                    callJS("if(typeof _onNativeTTSDone==='function') _onNativeTTSDone();");
-                                }
-                                @Override
-                                public void onError(String utteranceId) {
-                                    callJS("if(typeof _onNativeTTSError==='function') _onNativeTTSError();");
-                                }
-                            });
-                            Log.i(TAG, "TTS initialized OK");
-                        } catch (Exception e) {
-                            Log.e(TAG, "TTS setup error", e);
-                            ttsReady = false;
-                        }
-                    } else {
-                        Log.e(TAG, "TTS init failed: " + status);
-                        ttsReady = false;
-                    }
-                }
-            });
-        } catch (Exception e) {
-            Log.e(TAG, "TTS creation failed", e);
-            ttsReady = false;
-        }
-    }
-
-    @JavascriptInterface
-    public void speak(String text) {
-        ensureTTS();
-        // TTS init is async — if not ready yet, retry after 500ms
-        if (tts != null && ttsReady) {
-            tts.stop();
-            Bundle params = new Bundle();
-            tts.speak(text, TextToSpeech.QUEUE_FLUSH, params, "medreminder_tts");
-        } else {
-            // Wait for TTS init then speak
-            final String speechText = text;
-            activity.runOnUiThread(new Runnable() {
-                @Override
-                public void run() {
-                    webView.postDelayed(new Runnable() {
-                        @Override
-                        public void run() {
-                            if (tts != null && ttsReady) {
-                                tts.stop();
-                                Bundle p = new Bundle();
-                                tts.speak(speechText, TextToSpeech.QUEUE_FLUSH, p, "medreminder_tts");
-                            } else {
-                                Log.w(TAG, "TTS still not ready after delay");
-                                callJS("if(typeof _onNativeTTSError==='function') _onNativeTTSError();");
-                            }
-                        }
-                    }, 800);
-                }
-            });
-        }
-    }
-
-    @JavascriptInterface
-    public void stopSpeaking() {
-        if (tts != null) {
-            tts.stop();
-        }
-    }
-
-    @JavascriptInterface
-    public boolean isTTSAvailable() {
-        ensureTTS();
-        return ttsReady;
-    }
-
-    // ==================== Common ====================
-
-    private void callJS(final String js) {
-        activity.runOnUiThread(new Runnable() {
-            @Override
-            public void run() {
-                webView.loadUrl("javascript:" + js);
-            }
-        });
+    void callJS(String js) {
+        activity.runOnUiThread(() -> webView.loadUrl("javascript:" + js));
     }
 
     public void destroy() {
-        if (speechRecognizer != null) {
-            speechRecognizer.destroy();
-            speechRecognizer = null;
-        }
-        if (tts != null) {
+        if (recognizer != null) { recognizer.destroy(); recognizer = null; }
+        if (tts != null) { tts.stop(); tts.shutdown(); tts = null; }
+    }
+
+    // ==================== TTS (new) ====================
+
+    @JavascriptInterface
+    public void speak(String text) {
+        if (tts == null) {
+            tts = new TextToSpeech(activity, status -> {
+                if (status == TextToSpeech.SUCCESS) {
+                    tts.setLanguage(new Locale("vi", "VN"));
+                    tts.setSpeechRate(0.85f);
+                    tts.setPitch(1.1f);
+                    tts.setOnUtteranceProgressListener(new UtteranceProgressListener() {
+                        @Override public void onStart(String uid) { callJS("if(typeof _onNativeTTSStart==='function') _onNativeTTSStart();"); }
+                        @Override public void onDone(String uid) { callJS("if(typeof _onNativeTTSDone==='function') _onNativeTTSDone();"); }
+                        @Override public void onError(String uid) { callJS("if(typeof _onNativeTTSError==='function') _onNativeTTSError();"); }
+                    });
+                    ttsReady = true;
+                    tts.speak(text, TextToSpeech.QUEUE_FLUSH, new Bundle(), "mr_tts");
+                }
+            });
+        } else if (ttsReady) {
             tts.stop();
-            tts.shutdown();
-            tts = null;
+            tts.speak(text, TextToSpeech.QUEUE_FLUSH, new Bundle(), "mr_tts");
         }
     }
+
+    @JavascriptInterface
+    public void stopSpeaking() { if (tts != null) tts.stop(); }
+
+    @JavascriptInterface
+    public boolean isTTSAvailable() { return ttsReady; }
 }
