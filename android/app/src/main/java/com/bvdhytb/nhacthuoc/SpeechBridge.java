@@ -1,144 +1,126 @@
-package com.bvdhytb.nhacthuoc;
+// fix-ai-tts-bridge.js — Chạy từ C:\pw4: node fix-ai-tts-bridge.js
+// Update speakAIReply() để ưu tiên AndroidSpeech.speak() native bridge (cho APK Huawei)
+// Fallback Web Speech API cho PWA web
 
-import android.Manifest;
-import android.app.Activity;
-import android.content.Intent;
-import android.content.pm.PackageManager;
-import android.os.Bundle;
-import android.speech.RecognitionListener;
-import android.speech.RecognizerIntent;
-import android.speech.SpeechRecognizer;
-import android.webkit.JavascriptInterface;
-import android.webkit.WebView;
+const fs = require('fs');
 
-import androidx.core.app.ActivityCompat;
-import androidx.core.content.ContextCompat;
+const file = 'pwa/index.html';
+let html = fs.readFileSync(file, 'utf8');
+const original = html;
 
-import java.util.ArrayList;
+// ──────────────────────────────────────────────────────────
+// Tìm và thay thế function speakAIReply hiện tại
+// ──────────────────────────────────────────────────────────
+const fnStartMarker = 'function speakAIReply(text) {';
+const startIdx = html.indexOf(fnStartMarker);
 
-public class SpeechBridge {
-    private final Activity activity;
-    private final WebView webView;
-    private SpeechRecognizer recognizer;
-
-    public SpeechBridge(Activity activity, WebView webView) {
-        this.activity = activity;
-        this.webView = webView;
-    }
-
-    @JavascriptInterface
-    public boolean isAvailable() {
-        return SpeechRecognizer.isRecognitionAvailable(activity);
-    }
-
-    @JavascriptInterface
-    public void startListening(String lang) {
-        if (!SpeechRecognizer.isRecognitionAvailable(activity)) {
-            sendError("Thi\u1ebft b\u1ecb kh\u00f4ng h\u1ed7 tr\u1ee3 nh\u1eadn d\u1ea1ng gi\u1ecdng n\u00f3i");
-            return;
-        }
-
-        // Check permission
-        if (ContextCompat.checkSelfPermission(activity, Manifest.permission.RECORD_AUDIO)
-                != PackageManager.PERMISSION_GRANTED) {
-            ActivityCompat.requestPermissions(activity,
-                new String[]{Manifest.permission.RECORD_AUDIO}, 100);
-            sendError("C\u1ea7n c\u1ea5p quy\u1ec1n micro");
-            return;
-        }
-
-        activity.runOnUiThread(() -> {
-            try {
-                if (recognizer != null) {
-                    recognizer.destroy();
-                }
-                recognizer = SpeechRecognizer.createSpeechRecognizer(activity);
-                recognizer.setRecognitionListener(new RecognitionListener() {
-                    @Override
-                    public void onReadyForSpeech(Bundle params) {
-                        callJS("window._onNativeSpeechState('ready')");
-                    }
-
-                    @Override public void onBeginningOfSpeech() {}
-                    @Override public void onRmsChanged(float rmsdB) {}
-                    @Override public void onBufferReceived(byte[] buffer) {}
-                    @Override public void onEndOfSpeech() {}
-                    @Override public void onEvent(int eventType, Bundle params) {}
-
-                    @Override
-                    public void onError(int error) {
-                        String msg;
-                        switch (error) {
-                            case SpeechRecognizer.ERROR_AUDIO: msg = "L\u1ed7i ghi \u00e2m"; break;
-                            case SpeechRecognizer.ERROR_INSUFFICIENT_PERMISSIONS: msg = "Ch\u01b0a c\u1ea5p quy\u1ec1n micro"; break;
-                            case SpeechRecognizer.ERROR_NETWORK: msg = "L\u1ed7i m\u1ea1ng"; break;
-                            case SpeechRecognizer.ERROR_NETWORK_TIMEOUT: msg = "H\u1ebft th\u1eddi gian k\u1ebft n\u1ed1i"; break;
-                            case SpeechRecognizer.ERROR_NO_MATCH: msg = "Kh\u00f4ng nh\u1eadn d\u1ea1ng \u0111\u01b0\u1ee3c"; break;
-                            case SpeechRecognizer.ERROR_SPEECH_TIMEOUT: msg = "Kh\u00f4ng nghe th\u1ea5y gi\u1ecdng n\u00f3i"; break;
-                            default: msg = "L\u1ed7i: " + error;
-                        }
-                        sendError(msg);
-                    }
-
-                    @Override
-                    public void onResults(Bundle results) {
-                        sendResults(results, true);
-                    }
-
-                    @Override
-                    public void onPartialResults(Bundle partialResults) {
-                        sendResults(partialResults, false);
-                    }
-                });
-
-                Intent intent = new Intent(RecognizerIntent.ACTION_RECOGNIZE_SPEECH);
-                intent.putExtra(RecognizerIntent.EXTRA_LANGUAGE_MODEL,
-                    RecognizerIntent.LANGUAGE_MODEL_FREE_FORM);
-                intent.putExtra(RecognizerIntent.EXTRA_LANGUAGE, lang);
-                intent.putExtra(RecognizerIntent.EXTRA_PARTIAL_RESULTS, true);
-                intent.putExtra(RecognizerIntent.EXTRA_MAX_RESULTS, 3);
-
-                recognizer.startListening(intent);
-            } catch (Exception e) {
-                sendError("Kh\u00f4ng kh\u1edfi \u0111\u1ed9ng \u0111\u01b0\u1ee3c: " + e.getMessage());
-            }
-        });
-    }
-
-    @JavascriptInterface
-    public void stopListening() {
-        activity.runOnUiThread(() -> {
-            if (recognizer != null) {
-                try { recognizer.stopListening(); } catch (Exception e) {}
-            }
-        });
-    }
-
-    public void destroy() {
-        if (recognizer != null) {
-            recognizer.destroy();
-            recognizer = null;
-        }
-    }
-
-    private void sendResults(Bundle bundle, boolean isFinal) {
-        ArrayList<String> matches =
-            bundle.getStringArrayList(SpeechRecognizer.RESULTS_RECOGNITION);
-        if (matches != null && !matches.isEmpty()) {
-            // Escape quotes in transcript
-            String transcript = matches.get(0).replace("\\", "\\\\").replace("'", "\\'");
-            callJS("window._onNativeSpeechResult('" + transcript + "', " + isFinal + ")");
-        }
-    }
-
-    private void sendError(String msg) {
-        String escaped = msg.replace("\\", "\\\\").replace("'", "\\'");
-        callJS("window._onNativeSpeechError('" + escaped + "')");
-    }
-
-    private void callJS(String js) {
-        activity.runOnUiThread(() -> {
-            webView.loadUrl("javascript:" + js);
-        });
-    }
+if (startIdx === -1) {
+  console.log('❌ Không tìm thấy function speakAIReply');
+  console.log('   Bạn cần chạy fix-ai-tts-final.js trước để tạo function này');
+  process.exit(1);
 }
+
+// Tìm closing bracket bằng depth counter
+const bodyStart = html.indexOf('{', startIdx);
+let depth = 0, endIdx = bodyStart;
+for (let i = bodyStart; i < html.length; i++) {
+  if (html[i] === '{') depth++;
+  else if (html[i] === '}') {
+    depth--;
+    if (depth === 0) { endIdx = i; break; }
+  }
+}
+
+const oldFn = html.slice(startIdx, endIdx + 1);
+console.log('Tìm thấy speakAIReply, length:', oldFn.length, 'chars');
+
+// ──────────────────────────────────────────────────────────
+// Function mới — ưu tiên native bridge
+// ──────────────────────────────────────────────────────────
+const NEW_FN = `function speakAIReply(text) {
+  if (!text) return;
+
+  // ─── ƯU TIÊN: Native Android TTS qua SpeechBridge (cho APK) ───
+  if (window.AndroidSpeech && typeof window.AndroidSpeech.speak === 'function') {
+    try {
+      console.log('[AI-TTS] using native AndroidSpeech.speak()');
+      window.AndroidSpeech.speak(text);
+      return;
+    } catch(e) {
+      console.warn('[AI-TTS] AndroidSpeech.speak failed:', e);
+      // Fall through to Web Speech API
+    }
+  }
+
+  // ─── FALLBACK: Web Speech API (cho PWA web) ───
+  if (!('speechSynthesis' in window)) {
+    console.warn('[AI-TTS] no speechSynthesis available');
+    return;
+  }
+  try {
+    window.speechSynthesis.cancel();
+
+    // Prime audio context bằng tone ngắn (Android WebView cần)
+    if (typeof audioCtx !== 'undefined' && audioCtx) {
+      try {
+        const now = audioCtx.currentTime;
+        const osc = audioCtx.createOscillator();
+        const gain = audioCtx.createGain();
+        osc.type = 'sine';
+        osc.frequency.value = 800;
+        gain.gain.setValueAtTime(0.05, now);
+        gain.gain.linearRampToValueAtTime(0, now + 0.1);
+        osc.connect(gain);
+        gain.connect(audioCtx.destination);
+        osc.start(now);
+        osc.stop(now + 0.12);
+      } catch(e) {}
+    }
+
+    setTimeout(() => {
+      try {
+        const u = new SpeechSynthesisUtterance(text);
+        if (typeof _vnVoiceCache !== 'undefined' && _vnVoiceCache) {
+          u.voice = _vnVoiceCache;
+        } else {
+          const voices = window.speechSynthesis.getVoices();
+          const vn = voices.find(v => v.lang && v.lang.startsWith('vi'));
+          if (vn) {
+            u.voice = vn;
+            if (typeof _vnVoiceCache !== 'undefined') _vnVoiceCache = vn;
+          }
+        }
+        u.lang = 'vi-VN';
+        u.rate = 0.85;
+        u.pitch = 1.1;
+        u.volume = 1.0;
+        u.onstart = () => console.log('[AI-TTS-Web] onstart');
+        u.onend = () => console.log('[AI-TTS-Web] onend');
+        u.onerror = (e) => console.warn('[AI-TTS-Web] onerror:', e.error);
+        window.speechSynthesis.speak(u);
+        console.log('[AI-TTS-Web] speak() called, length:', text.length);
+      } catch(e) {
+        console.error('[AI-TTS-Web] inner error:', e);
+      }
+    }, 250);
+  } catch(e) {
+    console.error('[AI-TTS-Web] outer error:', e);
+  }
+}`;
+
+html = html.slice(0, startIdx) + NEW_FN + html.slice(endIdx + 1);
+
+if (html === original) {
+  console.log('⚠️  File không thay đổi');
+  process.exit(1);
+}
+
+fs.writeFileSync(file + '.bak-pre-bridge', original, 'utf8');
+fs.writeFileSync(file, html, 'utf8');
+
+console.log('\n✅ Đã update speakAIReply()');
+console.log('   - Ưu tiên: window.AndroidSpeech.speak() (native)');
+console.log('   - Fallback: Web Speech API (PWA web)');
+console.log('💾 Backup: pwa/index.html.bak-pre-bridge');
+console.log('\n👉 Deploy PWA:');
+console.log('   npx wrangler deploy --config wrangler-pwa.jsonc');
