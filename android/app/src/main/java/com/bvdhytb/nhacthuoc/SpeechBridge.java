@@ -138,7 +138,7 @@ public class SpeechBridge {
 
     private void callJS(String js) {
         activity.runOnUiThread(() -> {
-            webView.loadUrl("javascript:" + js);
+            webView.evaluateJavascript(js, null);
         });
     }
 }
