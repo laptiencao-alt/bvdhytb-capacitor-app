@@ -79,16 +79,9 @@ jobs:
         uses: ncipollo/release-action@v1
         with:
           tag: "stable"
-          name: "MedReminder BV ĐHY Thái Bình — Phiên bản mới nhất"
-          body: |
-            **Ứng dụng nhắc thuốc — Bệnh viện Đại học Y Thái Bình**
-
-            📲 Quét mã QR tại phòng khám hoặc nhấn link bên dưới để tải về.
-
-            > File này được cập nhật tự động mỗi khi có build mới.
+          name: "MedReminder BV DHY Thai Binh - Phien ban moi nhat"
+          body: "Ung dung nhac thuoc - Benh vien Dai hoc Y Thai Binh. File nay duoc cap nhat tu dong moi khi co build moi."
           artifacts: "MedReminder-BvDHYTB.apk"
           allowUpdates: true
           removeArtifacts: true
           token: ${{ secrets.GITHUB_TOKEN }}
-﻿
-      
