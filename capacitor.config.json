@@ -1,7 +1,11 @@
-{{
+{
   "appId": "com.bvdhytb.nhacthuoc",
   "appName": "BVDHYTB",
   "webDir": ".",
+  "server": {
+    "url": "https://bvdhytb-pwa.bvdhytb-nhacthuoc.workers.dev",
+    "cleartext": false
+  },
   "android": {
     "allowMixedContent": false
   }
